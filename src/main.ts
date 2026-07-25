@@ -893,8 +893,39 @@ function runSelfTest(): void {
   });
 }
 
+// Inspect mode: electron . --inspect-streams --selftest-token=<path> [--selftest-host=...] [--selftest-channel=3]
+// Joins a voice channel as the token's user, lists remote producers, consumes each
+// video+screen producer, and prints the consumer rtpParameters (codec + scalability +
+// encodings) + server-reported qualityLayers. Reveals exactly what each other user is
+// offering. (A user cannot consume their own producer — getRemoteIds filters self — so
+// to inspect a given user you must run this as a DIFFERENT account joined to their
+// channel.)
+function runInspectStreams(): void {
+  const tokenPath = app.commandLine.getSwitchValue('selftest-token');
+  let token = '';
+  if (tokenPath) { try { token = readFileSync(tokenPath, 'utf8').trim(); } catch {} }
+  if (!token) { process.stdout.write('[inspect] requires --selftest-token=<path>\n'); app.quit(); return; }
+  const query: Record<string, string> = {
+    host: app.commandLine.getSwitchValue('selftest-host') || 'sharkord.thesemite.com',
+    token,
+    channel: app.commandLine.getSwitchValue('selftest-channel') || '3'
+  };
+  const win = new BrowserWindow({
+    width: 700, height: 600, show: true, title: 'Sharkov Stream Inspector',
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  win.setMenuBarVisibility(false);
+  win.loadFile(path.join(__dirname, '..', 'static', 'inspect.html'), { query });
+  win.webContents.on('console-message', (_e, ...args: unknown[]) => {
+    const msg = args.length >= 2 ? (args[1] as string) : ((args[0] as { message?: string })?.message ?? String(args[0]));
+    process.stdout.write(`[inspect] ${msg}\n`);
+  });
+  ipcMain.once('inspect-done', () => { try { win.close(); } catch {} app.quit(); });
+}
+
 app.whenReady().then(async () => {
   if (app.commandLine.hasSwitch('selftest') || app.commandLine.hasSwitch('selftest-live')) { runSelfTest(); return; }
+  if (app.commandLine.hasSwitch('inspect-streams')) { runInspectStreams(); return; }
   const StoreImpl = (await import('electron-store')).default;
   store = new StoreImpl<{ serverUrl: string; savedServers: string }>({
     defaults: { serverUrl: 'https://demo.sharkord.com', savedServers: '[]' }

@@ -16,3 +16,6 @@ live-selftest-*.json
 
 # patched mediasoup worker binary (10MB, built locally)
 evidence/mediasoup-patches/mediasoup-worker-av1-simulcast
+
+# sharkord bot account token for the stream inspector (minted server-side)
+.bot-token
