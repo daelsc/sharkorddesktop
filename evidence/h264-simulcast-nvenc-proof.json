@@ -1,17 +1,32 @@
 {
-  "captured": "2026 live CDP inspection of real screen share in electron dev build",
+  "captured": "2026 live CDP inspection + rtc-stats.log of real screen share in electron dev build",
   "server": "sharkord.thesemite.com (v0.0.23, webRtcSimulcastEnabled=true)",
-  "goal": "H264 hardware (NVENC) simulcast in the real app",
+  "goal": "H264 hardware (NVENC) simulcast in the real app, observable in rtc-stats.log",
   "result": "ACHIEVED",
-  "negotiated_codec": "video/H264",
-  "simulcast": true,
-  "scalabilityMode": "L1T3",
-  "layers": [
-    { "rid": "r0", "label": "Low",    "width": 480,  "height": 270,  "framesEncoded": 1985 },
-    { "rid": "r1", "label": "Medium", "width": 960,  "height": 540,  "framesEncoded": 3069 },
-    { "rid": "r2", "label": "High",   "width": 1920, "height": 1080, "framesEncoded": 1579 }
-  ],
-  "encoderImplementation": "SimulcastEncoderAdapter (OpenH264, MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT), MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT))",
-  "hardware": "NVIDIA H.264 Encoder MFT (NVENC) active for the higher layers incl. 1080p; lowest 480x270 layer on OpenH264 software (normal Chromium simulcast behavior)",
-  "notes": "The original complaint was that Sharkov 'no longer defaults to streaming x264 in hardware'. Root cause: getWebrtcStatsInjectionCode() forced H264 + collapsed all encodings to a single bitrate, which broke upstream simulcast AND the v0.0.23 SPA hardcoded VP8 for simulcast. Fixes: (1) made the injection simulcast-aware (skip simulcast senders, preserve per-layer bitrates), (2) patched the server SPA bundle so simulcast codec honors the screenCodec device pref, (3) added a desktop Codec dropdown (was created but never appended to the bar), (4) reload SPA on codec change so the DevicesProvider rehydrates the new screenCodec."
+  "rtc_stats_log": {
+    "note": "The DEV build (package name sharkov-desktop) writes to a DIFFERENT userData folder than the INSTALLED app (sharkord-desktop with an 'r'). The dev log is the one that grows.",
+    "dev_log_path": "C:/Users/dave/AppData/Roaming/sharkov-desktop/rtc-stats.log",
+    "installed_log_path": "C:/Users/dave/AppData/Roaming/sharkord-desktop/rtc-stats.log (old, from the stock installed app)",
+    "actively_growing": true,
+    "sample_entry": "2026-07-25T18:42:49.236Z video_out: codec=video/H264, 480x270, frameRate=31, framesEncoded=2590, encoderImplementation=SimulcastEncoderAdapter (OpenH264, MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT), MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT))"
+  },
+  "cdp_capture": {
+    "negotiated_codec": "video/H264",
+    "simulcast": true,
+    "scalabilityMode": "L1T3",
+    "layers": [
+      { "rid": "r0", "label": "Low",    "width": 480,  "height": 270,  "framesEncoded": 1985 },
+      { "rid": "r1", "label": "Medium", "width": 960,  "height": 540,  "framesEncoded": 3069 },
+      { "rid": "r2", "label": "High",   "width": 1920, "height": 1080, "framesEncoded": 1579 }
+    ],
+    "encoderImplementation": "SimulcastEncoderAdapter (OpenH264, MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT), MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT))"
+  },
+  "hardware": "NVIDIA H.264 Encoder MFT (NVENC) active for the higher simulcast layers incl. 1080p; lowest 480x270 layer on OpenH264 software (normal Chromium simulcast behavior)",
+  "root_causes_fixed": [
+    "getWebrtcStatsInjectionCode() forced H264 + collapsed all encodings to a single bitrate, breaking upstream simulcast -> made simulcast-aware (skip simulcast senders, preserve per-layer bitrates)",
+    "v0.0.23 SPA hardcoded VP8 for simulcast -> server-side bundle patch so simulcast codec honors screenCodec device pref",
+    "Codec dropdown was created in JS but never appended to the bitrate bar (only Bitrate showed) -> appended codecLabel + codecSelect",
+    "Picking a codec wrote localStorage but the SPA's DevicesProvider only rehydrates on mount, so the live React context stayed stale -> injection now reloads the SPA so the provider rehydrates the new screenCodec",
+    "webrtc-stats injection never loaded: a `//` line comment inside a .join('') single-line string ran to EOF and swallowed the rest of the code (SyntaxError swallowed by .catch) -> converted to /* */ block comment"
+  ]
 }
