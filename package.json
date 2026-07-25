@@ -1,6 +1,6 @@
 {
   "name": "sharkov-desktop",
-  "version": "0.23.8",
+  "version": "0.23.9",
   "description": "Electron desktop app for Sharkov — voice, video, and text chat",
   "author": "Sharkov Desktop contributors",
   "license": "MIT",
