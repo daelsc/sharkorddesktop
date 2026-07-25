@@ -1,0 +1,17 @@
+{
+  "captured": "2026 live CDP inspection of real screen share in electron dev build",
+  "server": "sharkord.thesemite.com (v0.0.23, webRtcSimulcastEnabled=true)",
+  "goal": "H264 hardware (NVENC) simulcast in the real app",
+  "result": "ACHIEVED",
+  "negotiated_codec": "video/H264",
+  "simulcast": true,
+  "scalabilityMode": "L1T3",
+  "layers": [
+    { "rid": "r0", "label": "Low",    "width": 480,  "height": 270,  "framesEncoded": 1985 },
+    { "rid": "r1", "label": "Medium", "width": 960,  "height": 540,  "framesEncoded": 3069 },
+    { "rid": "r2", "label": "High",   "width": 1920, "height": 1080, "framesEncoded": 1579 }
+  ],
+  "encoderImplementation": "SimulcastEncoderAdapter (OpenH264, MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT), MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT))",
+  "hardware": "NVIDIA H.264 Encoder MFT (NVENC) active for the higher layers incl. 1080p; lowest 480x270 layer on OpenH264 software (normal Chromium simulcast behavior)",
+  "notes": "The original complaint was that Sharkov 'no longer defaults to streaming x264 in hardware'. Root cause: getWebrtcStatsInjectionCode() forced H264 + collapsed all encodings to a single bitrate, which broke upstream simulcast AND the v0.0.23 SPA hardcoded VP8 for simulcast. Fixes: (1) made the injection simulcast-aware (skip simulcast senders, preserve per-layer bitrates), (2) patched the server SPA bundle so simulcast codec honors the screenCodec device pref, (3) added a desktop Codec dropdown (was created but never appended to the bar), (4) reload SPA on codec change so the DevicesProvider rehydrates the new screenCodec."
+}
