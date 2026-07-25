@@ -393,7 +393,7 @@ function getWebrtcStatsInjectionCode(): string {
     '    if(!s.track||s.track.kind!=="video")return;',
     '    var p=s.getParameters();',
     '    if(!p.encodings||p.encodings.length===0)p.encodings=[{}];',
-    '    if(p.encodings.length>1)return; // (redundant safety) handled by isSimulcastSender below',
+    '    if(p.encodings.length>1)return; /* (redundant safety) handled by isSimulcastSender below */',
     '    if(isSimulcastSender(s))return;', // simulcast (rid-aware) — preserve per-layer bitrates
     '    var enc=p.encodings[0];var changed=false;',
     '    if(enc.maxBitrate!==FORCED_BPS){enc.maxBitrate=FORCED_BPS;changed=true;}',
