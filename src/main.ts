@@ -509,14 +509,13 @@ function getSimulcastCodecInjectionCode(): string {
     // short codec name (desktop UI) -> SPA Hi.* mimeType value
     'var MIME={auto:"auto",h264:"video/H264",vp8:"video/VP8",vp9:"video/VP9",av1:"video/AV1",h265:"video/H265"};',
     'function mimeFor(name){if(!name)return undefined;var n=String(name).toLowerCase();return MIME[n]||("video/"+name);}',
-    // find the redux-persist root key: the localStorage entry whose JSON has a `devices` field
-    'function findPersistKey(){for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(!k)continue;var v=localStorage.getItem(k);if(!v)continue;try{var o=JSON.parse(v);if(o&&typeof o==="object"&&o.devices&&typeof o.devices==="object")return k;}catch(e){}}return null;}',
-    'function setScreenCodecInStorage(mime){var k=findPersistKey();if(!k)return false;try{var raw=localStorage.getItem(k);var o=JSON.parse(raw);o.devices=Object.assign({},o.devices,{screenCodec:mime});localStorage.setItem(k,JSON.stringify(o));return true;}catch(e){return false;}}',
-    // push into the live store if exposed (best-effort; createSlice actions are scoped to
-    // their slice prefix, so a raw dispatch with an arbitrary type is usually ignored — the
-    // authoritative apply is the localStorage write + rehydration on next SPA load).
-    'function setScreenCodecInStore(mime){try{var s=window.__SHARKORD_STORE__;if(!s||!s.dispatch||!s.getState)return false;var st=s.getState();var dev=st.devices;if(!dev)return false;var next=Object.assign({},dev,{screenCodec:mime});var fn=null;try{fn=s.devicesActions&&s.devicesActions.setDevices;}catch(e){}if(fn){s.dispatch(fn(next));return true;}return false;}catch(e){return false;}}',
-    'function applyCodec(name){var m=mimeFor(name);if(!m)return;var inStore=setScreenCodecInStore(m);var inStorage=setScreenCodecInStorage(m);console.log("[Sharkov] set simulcast screenCodec="+m+" (store="+inStore+", storage="+inStorage+")");}',
+    // The SPA persists device settings (including screenCodec + simulcastEnabled) to a
+    // STABLE localStorage key: "sharkord-devices-settings". The JSON has the device
+    // fields at the TOP LEVEL (no `devices` wrapper). Patch screenCodec there and the
+    // SPA rehydrates it on next load. (Older builds used a redux-persist randomized
+    // key with a `devices` field — scan for that as a fallback.)
+    'function setScreenCodecInStorage(mime){var keys=["sharkord-devices-settings"];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(!k||keys.indexOf(k)!==-1)continue;var v=localStorage.getItem(k);if(!v)continue;try{var o=JSON.parse(v);if(o&&typeof o==="object"&&o.devices&&typeof o.devices==="object")keys.push(k);}catch(e){}}for(var ki=0;ki<keys.length;ki++){var key=keys[ki];try{var raw=localStorage.getItem(key);if(!raw)continue;var o2=JSON.parse(raw);if(o2&&typeof o2==="object"){if(o2.devices){o2.devices=Object.assign({},o2.devices,{screenCodec:mime});}else{o2.screenCodec=mime;}localStorage.setItem(key,JSON.stringify(o2));return true;}}catch(e){}}return false;}',
+    'function applyCodec(name){var m=mimeFor(name);if(!m)return;var inStorage=setScreenCodecInStorage(m);console.log("[Sharkov] set simulcast screenCodec="+m+" (storage="+inStorage+")");}',
     // desktop codec selector messages drive this
     'window.addEventListener("message",function(e){if(!e.data||e.data.type!=="sharkord-set-video-codec")return;applyCodec(e.data.codec);});',
     '})();'

@@ -39,7 +39,8 @@
     "terser": "^5.36.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.21.0",
-    "vitest": "^2.1.9"
+    "vitest": "^2.1.9",
+    "ws": "^8.21.1"
   },
   "build": {
     "appId": "com.sharkov.desktop",
