@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-07-25T19:23:28.969Z",
+  "cfg": {
+    "host": "sharkord.thesemite.com",
+    "token": "<redacted>",
+    "channel": 4,
+    "codec": "H264",
+    "kind": "screen",
+    "simulcast": true,
+    "svc": "",
+    "sampleMs": 15000
+  },
+  "server": {
+    "host": "sharkord.thesemite.com",
+    "simulcastEnabled": true,
+    "webRtcMaxBitrate": 30000000,
+    "name": "SHARKOV"
+  },
+  "routerCodecs": [
+    "video/H264",
+    "video/rtx",
+    "video/H264",
+    "video/rtx",
+    "video/AV1",
+    "video/rtx",
+    "video/VP9",
+    "video/rtx",
+    "video/VP8",
+    "video/rtx",
+    "audio/opus"
+  ],
+  "layers": [
+    {
+      "rid": "r1",
+      "codec": "video/H264",
+      "framesEncoded": 442,
+      "width": 640,
+      "height": 360,
+      "fps": 30,
+      "bytesSent": 1672020,
+      "targetBitrate": 500000,
+      "totalEncodeTime": 0.707,
+      "msPerFrame": 1.6,
+      "msPerKpx": 0.007,
+      "keyFramesEncoded": 3,
+      "qualityLimitationReason": "none",
+      "active": true,
+      "encoderImplementation": "",
+      "hardware": "likely-hardware"
+    },
+    {
+      "rid": "r0",
+      "codec": "video/H264",
+      "framesEncoded": 442,
+      "width": 320,
+      "height": 180,
+      "fps": 30,
+      "bytesSent": 395614,
+      "targetBitrate": 187500,
+      "totalEncodeTime": 0.166,
+      "msPerFrame": 0.376,
+      "msPerKpx": 0.007,
+      "keyFramesEncoded": 7,
+      "qualityLimitationReason": "none",
+      "active": true,
+      "encoderImplementation": "",
+      "hardware": "likely-hardware"
+    },
+    {
+      "rid": "r2",
+      "codec": "video/H264",
+      "framesEncoded": 29,
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "bytesSent": 116514,
+      "targetBitrate": 613333,
+      "totalEncodeTime": 0.071,
+      "msPerFrame": 2.448,
+      "msPerKpx": 0.003,
+      "keyFramesEncoded": 2,
+      "qualityLimitationReason": "none",
+      "active": true,
+      "encoderImplementation": "",
+      "hardware": "likely-hardware"
+    }
+  ],
+  "activeLayerCount": 3,
+  "encodingsConfigured": 3
+}
