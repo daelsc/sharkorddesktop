@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-07-25T18:48:33.388Z",
+  "cfg": {
+    "host": "sharkord.thesemite.com",
+    "token": "<redacted>",
+    "channel": 4,
+    "codec": "H265",
+    "kind": "screen",
+    "simulcast": true,
+    "svc": "",
+    "sampleMs": 15000
+  },
+  "server": {
+    "host": "sharkord.thesemite.com",
+    "simulcastEnabled": true,
+    "webRtcMaxBitrate": 30000000,
+    "name": "SHARKOV"
+  },
+  "routerCodecs": [
+    "video/H264",
+    "video/rtx",
+    "video/H264",
+    "video/rtx",
+    "video/AV1",
+    "video/rtx",
+    "video/VP9",
+    "video/rtx",
+    "video/VP8",
+    "video/rtx",
+    "audio/opus"
+  ],
+  "layers": [
+    {
+      "rid": "r1",
+      "codec": "video/H264",
+      "framesEncoded": 441,
+      "width": 640,
+      "height": 360,
+      "fps": 30,
+      "bytesSent": 1012441,
+      "targetBitrate": 532174,
+      "totalEncodeTime": 0.696,
+      "msPerFrame": 1.578,
+      "msPerKpx": 0.007,
+      "keyFramesEncoded": 2,
+      "qualityLimitationReason": "bandwidth",
+      "active": true,
+      "encoderImplementation": "",
+      "hardware": "likely-hardware"
+    },
+    {
+      "rid": "r0",
+      "codec": "video/H264",
+      "framesEncoded": 441,
+      "width": 320,
+      "height": 180,
+      "fps": 29,
+      "bytesSent": 401053,
+      "targetBitrate": 225000,
+      "totalEncodeTime": 0.16,
+      "msPerFrame": 0.363,
+      "msPerKpx": 0.006,
+      "keyFramesEncoded": 6,
+      "qualityLimitationReason": "bandwidth",
+      "active": true,
+      "encoderImplementation": "",
+      "hardware": "likely-hardware"
+    },
+    {
+      "rid": "r2",
+      "codec": "video/H264",
+      "framesEncoded": 6,
+      "width": 0,
+      "height": 0,
+      "fps": 0,
+      "bytesSent": 39589,
+      "targetBitrate": 0,
+      "totalEncodeTime": 0.016,
+      "msPerFrame": 2.667,
+      "msPerKpx": 0,
+      "keyFramesEncoded": 1,
+      "qualityLimitationReason": "bandwidth",
+      "active": true,
+      "encoderImplementation": "",
+      "hardware": "likely-software"
+    }
+  ],
+  "activeLayerCount": 3,
+  "encodingsConfigured": 3
+}

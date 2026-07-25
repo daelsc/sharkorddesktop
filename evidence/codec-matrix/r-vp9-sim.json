@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-07-25T18:48:12.867Z",
+  "cfg": {
+    "host": "sharkord.thesemite.com",
+    "token": "<redacted>",
+    "channel": 4,
+    "codec": "VP9",
+    "kind": "screen",
+    "simulcast": true,
+    "svc": "",
+    "sampleMs": 15000
+  },
+  "server": {
+    "host": "sharkord.thesemite.com",
+    "simulcastEnabled": true,
+    "webRtcMaxBitrate": 30000000,
+    "name": "SHARKOV"
+  },
+  "routerCodecs": [
+    "video/H264",
+    "video/rtx",
+    "video/H264",
+    "video/rtx",
+    "video/AV1",
+    "video/rtx",
+    "video/VP9",
+    "video/rtx",
+    "video/VP8",
+    "video/rtx",
+    "audio/opus"
+  ],
+  "layers": [],
+  "error": "video/VP9 codec not supported for simulcast [method:transport.produce]",
+  "stack": "TRPCClientError: video/VP9 codec not supported for simulcast [method:transport.produce]\n    at TRPCClientError.from (C:\\Users\\dave\\git\\sharkorddesktop\\node_modules\\@trpc\\client\\dist\\TRPCClientError-Dey88Uiy.cjs:41:42)\n    at Object.next (C:\\Users\\dave\\git\\sharkorddesktop\\node_modules\\@trpc\\client\\dist\\wsLink-BcTLPVgc.cjs:507:61)\n    at WsClient.handleResponseMessage (C:\\Users\\dave\\git\\sharkorddesktop\\node_modules\\@trpc\\client\\dist\\wsLink-BcTLPVgc.cjs:608:21)\n    at WebSocket.<anonymous> (C:\\Users\\dave\\git\\sharkorddesktop\\node_modules\\@trpc\\client\\dist\\wsLink-BcTLPVgc.cjs:584:9)"
+}

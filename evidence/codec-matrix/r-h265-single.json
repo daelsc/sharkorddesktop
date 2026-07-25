@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-07-25T18:48:15.663Z",
+  "cfg": {
+    "host": "sharkord.thesemite.com",
+    "token": "<redacted>",
+    "channel": 4,
+    "codec": "H265",
+    "kind": "screen",
+    "simulcast": false,
+    "svc": "",
+    "sampleMs": 15000
+  },
+  "server": {
+    "host": "sharkord.thesemite.com",
+    "simulcastEnabled": true,
+    "webRtcMaxBitrate": 30000000,
+    "name": "SHARKOV"
+  },
+  "routerCodecs": [
+    "video/H264",
+    "video/rtx",
+    "video/H264",
+    "video/rtx",
+    "video/AV1",
+    "video/rtx",
+    "video/VP9",
+    "video/rtx",
+    "video/VP8",
+    "video/rtx",
+    "audio/opus"
+  ],
+  "layers": [
+    {
+      "rid": null,
+      "codec": "video/H264",
+      "framesEncoded": 427,
+      "width": 1280,
+      "height": 720,
+      "fps": 30,
+      "bytesSent": 2624965,
+      "targetBitrate": 2438420,
+      "totalEncodeTime": 0.811,
+      "msPerFrame": 1.899,
+      "msPerKpx": 0.002,
+      "keyFramesEncoded": 1,
+      "qualityLimitationReason": "none",
+      "active": true,
+      "encoderImplementation": "",
+      "hardware": "likely-hardware"
+    }
+  ],
+  "activeLayerCount": 1,
+  "encodingsConfigured": 1
+}
