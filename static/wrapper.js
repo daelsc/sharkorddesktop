@@ -2170,6 +2170,8 @@
 
     bitrateBar.appendChild(bitrateLabel);
     bitrateBar.appendChild(bitrateSelect);
+    bitrateBar.appendChild(codecLabel);
+    bitrateBar.appendChild(codecSelect);
     container.style.position = 'relative';
     container.appendChild(bitrateBar);
   }

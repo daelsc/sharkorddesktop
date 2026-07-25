@@ -511,11 +511,16 @@ function getSimulcastCodecInjectionCode(): string {
     'function mimeFor(name){if(!name)return undefined;var n=String(name).toLowerCase();return MIME[n]||("video/"+name);}',
     // The SPA persists device settings (including screenCodec + simulcastEnabled) to a
     // STABLE localStorage key: "sharkord-devices-settings". The JSON has the device
-    // fields at the TOP LEVEL (no `devices` wrapper). Patch screenCodec there and the
-    // SPA rehydrates it on next load. (Older builds used a redux-persist randomized
-    // key with a `devices` field — scan for that as a fallback.)
+    // fields at the TOP LEVEL (no `devices` wrapper). Patch screenCodec there. The SPA's
+    // DevicesProvider reads localStorage only in its useState initializer (on mount),
+    // so to make a mid-session codec change take effect we ALSO reload the SPA iframe
+    // after writing — the provider rehydrates the new screenCodec on next mount.
     'function setScreenCodecInStorage(mime){var keys=["sharkord-devices-settings"];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(!k||keys.indexOf(k)!==-1)continue;var v=localStorage.getItem(k);if(!v)continue;try{var o=JSON.parse(v);if(o&&typeof o==="object"&&o.devices&&typeof o.devices==="object")keys.push(k);}catch(e){}}for(var ki=0;ki<keys.length;ki++){var key=keys[ki];try{var raw=localStorage.getItem(key);if(!raw)continue;var o2=JSON.parse(raw);if(o2&&typeof o2==="object"){if(o2.devices){o2.devices=Object.assign({},o2.devices,{screenCodec:mime});}else{o2.screenCodec=mime;}localStorage.setItem(key,JSON.stringify(o2));return true;}}catch(e){}}return false;}',
-    'function applyCodec(name){var m=mimeFor(name);if(!m)return;var inStorage=setScreenCodecInStorage(m);console.log("[Sharkov] set simulcast screenCodec="+m+" (storage="+inStorage+")");}',
+    // read the LIVE screenCodec from the React DevicesProvider context (fiber walk)
+    'function liveScreenCodec(){try{var r=document.getElementById("root");if(!r)return null;var key=Object.keys(r).find(function(k){return k.startsWith("__reactContainer$")||k.startsWith("__reactFiber$");});var f=r[key]&&(r[key].current||r[key]);var hit=null;function w(n,d){if(!n||d>300||hit)return;var p=n.memoizedProps;if(p&&typeof p==="object"&&p.value&&typeof p.value==="object"){var v=p.value;if("screenCodec" in v){hit=v.screenCodec;return;}if(v.devices&&"screenCodec" in v.devices){hit=v.devices.screenCodec;return;}}w(n.child,d+1);w(n.sibling,d+1);}w(f,0);return hit;}catch(e){return null;}}',
+    // reload the SPA document so DevicesProvider rehydrates the new screenCodec
+    'function reloadSpa(){try{window.location.reload();}catch(e){}}',
+    'function applyCodec(name){var m=mimeFor(name);if(!m)return;var live=liveScreenCodec();var wrote=setScreenCodecInStorage(m);console.log("[Sharkov] set simulcast screenCodec="+m+" (live="+live+", wrote="+wrote+")");if(wrote&&live!==m){console.log("[Sharkov] reloading SPA to rehydrate screenCodec="+m);reloadSpa();}}',
     // desktop codec selector messages drive this
     'window.addEventListener("message",function(e){if(!e.data||e.data.type!=="sharkord-set-video-codec")return;applyCodec(e.data.codec);});',
     '})();'
