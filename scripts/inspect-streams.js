@@ -72,7 +72,9 @@ function log(m) { console.log('[inspect] ' + m); logToDom('[inspect] ' + m); }
           localConsumer = await consumerTransport.consume({
             id: res.consumerId,
             producerId: res.producerId,
-            kind: res.consumerKind,
+            // mediasoup-client only accepts 'video'/'audio' as the track kind; a
+            // 'screen' producer is still a video track on the wire.
+            kind: (res.consumerKind === 'screen' || res.consumerKind === 'video') ? 'video' : 'audio',
             rtpParameters: res.consumerRtpParameters
           });
         } catch (ce) {
@@ -88,7 +90,7 @@ function log(m) { console.log('[inspect] ' + m); logToDom('[inspect] ' + m); }
             try {
               const st = await localConsumer.getStats();
               st.forEach(s => {
-                if (s.type === 'inbound-rtp' && (s.kind === kind || s.mediaType === kind)) {
+                if (s.type === 'inbound-rtp' && (s.kind === 'video' || s.mediaType === 'video' || s.kind === 'audio' || s.mediaType === 'audio')) {
                   if (prev) {
                     const dt = (s.timestamp - prev.ts) / 1000;
                     if (dt > 0) {
