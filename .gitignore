@@ -7,3 +7,6 @@ README.md
 static/buildId.json
 .claude/
 docs/
+
+# Self-test generated reports
+selftest-report*.json

@@ -2144,7 +2144,7 @@
     codecLabel.style.cssText = 'font-size:11px;color:#a1a1aa;margin-left:8px;';
     var codecSelect = document.createElement('select');
     codecSelect.style.cssText = 'background:#27272a;color:#e4e4e7;border:1px solid #3f3f46;border-radius:4px;font-size:11px;padding:2px 4px;cursor:pointer;outline:none;';
-    ['H264', 'VP8', 'VP9', 'AV1'].forEach(function (c) {
+    ['AUTO', 'H264', 'H265', 'VP8', 'VP9', 'AV1'].forEach(function (c) {
       var o = document.createElement('option');
       o.value = c;
       o.textContent = c;

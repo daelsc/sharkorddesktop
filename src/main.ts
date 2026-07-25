@@ -346,12 +346,31 @@ function getWebrtcStatsInjectionCode(): string {
     'var FORCED_BPS=' + FORCED_BPS + ';',
     'var FORCED_CODEC=' + FORCED_CODEC + ';',
 
-    // Force preferred codec on transceivers
+    // Force preferred codec on transceivers — but NEVER on simulcast senders.
+    // A simulcast sender uses the app-chosen simulcast codec (VP8/AV1). Forcing
+    // H264/H265 here would break simulcast: Chromium can't do 3-layer H264/H265
+    // simulcast, so the upper layers would die. "AUTO" means let the app decide
+    // (no forcing at all) — preserves upstream simulcast.
+    //
+    // Robust simulcast detection: getParameters().encodings can COLLAPSE to the
+    // base layer when the upper layers are inactive (P2P, or an SFU not yet
+    // subscribed to mid/high), so encodings.length>1 alone misses real simulcast
+    // senders and would let us force-collapse them. The base encoding keeps its
+    // `rid` and scaleResolutionDownBy through the collapse, so detect on those.
+    'function isSimulcastSender(sender){',
+    '  try{var p=sender.getParameters();if(!p||!p.encodings)return false;',
+    '    if(p.encodings.length>1)return true;',
+    '    for(var i=0;i<p.encodings.length;i++){var e=p.encodings[i];',
+    '      if(e.rid)return true;',
+    '      if(e.scaleResolutionDownBy&&e.scaleResolutionDownBy>1)return true;}',
+    '    return false;}catch(e){return false;}',
+    '}',
     'function forceCodec(pc){',
-    '  if(!FORCED_CODEC)return;',
+    '  if(!FORCED_CODEC||FORCED_CODEC==="AUTO")return;',
     '  try{var transceivers=pc.getTransceivers();',
     '  transceivers.forEach(function(t){',
     '    if(!t.sender||!t.sender.track||t.sender.track.kind!=="video")return;',
+    '    if(isSimulcastSender(t.sender))return;',
     '    if(!OrigPC.getCapabilities)return;',
     '    var caps=OrigPC.getCapabilities("video");',
     '    if(!caps||!caps.codecs)return;',
@@ -361,31 +380,41 @@ function getWebrtcStatsInjectionCode(): string {
     '  });}catch(e){}',
     '}',
 
-    // Apply bitrate limits — force min=max to bypass bandwidth estimator
+    // Apply bitrate limits — but ONLY to single-stream senders. The old code forced
+    // min=max=FORCED_BPS on EVERY encoding, which collapsed simulcast's distinct
+    // low/mid/high quality layers into one flat bitrate (destroying simulcast).
+    // For a simulcast sender we leave the app's per-layer bitrates untouched and
+    // let the SFU manage per-layer congestion/subscription. For single-stream we
+    // keep the original behaviour: force a constant bitrate to bypass the bandwidth
+    // estimator (desired for LAN/local screen share) + maintain-resolution.
     'function applyBitrateLimits(pc){',
     '  if(!FORCED_BPS)return;',
     '  try{pc.getSenders().forEach(function(s){',
     '    if(!s.track||s.track.kind!=="video")return;',
     '    var p=s.getParameters();',
     '    if(!p.encodings||p.encodings.length===0)p.encodings=[{}];',
-    '    var changed=false;',
-    '    p.encodings.forEach(function(enc){',
-    '      if(enc.maxBitrate!==FORCED_BPS||enc.minBitrate!==FORCED_BPS){',
-    '        enc.maxBitrate=FORCED_BPS;enc.minBitrate=FORCED_BPS;changed=true;}',
-    '    });',
+    '    if(p.encodings.length>1)return; // (redundant safety) handled by isSimulcastSender below',
+    '    if(isSimulcastSender(s))return;', // simulcast (rid-aware) — preserve per-layer bitrates
+    '    var enc=p.encodings[0];var changed=false;',
+    '    if(enc.maxBitrate!==FORCED_BPS){enc.maxBitrate=FORCED_BPS;changed=true;}',
+    '    if(enc.minBitrate!==FORCED_BPS){enc.minBitrate=FORCED_BPS;changed=true;}',
     '    if(!p.degradationPreference||p.degradationPreference!=="maintain-resolution"){',
     '      p.degradationPreference="maintain-resolution";changed=true;}',
     '    if(changed)s.setParameters(p).catch(function(){});',
     '  });}catch(e){}',
     '}',
 
-    // Force bandwidth in SDP
+    // Force bandwidth in SDP — but skip simulcast m-lines. A single b=AS cap on a
+    // simulcast m-line throttles the aggregate across all layers and can starve the
+    // high layer; the per-layer encodings already express intent. Chromium marks
+    // simulcast sections with `a=simulcast`, so detect on that.
     'function forceSdpBandwidth(sdp){',
     '  if(!sdp||!FORCED_BPS)return sdp;',
     '  var bwKbps=Math.round(FORCED_BPS/1000);',
     '  var sections=sdp.split(/(?=m=)/);',
     '  for(var i=0;i<sections.length;i++){',
     '    if(sections[i].indexOf("m=video")===0){',
+    '      if(/a=simulcast/i.test(sections[i]))continue;',
     '      sections[i]=sections[i].replace(/b=AS:\\d+\\r?\\n/g,"");',
     '      sections[i]=sections[i].replace(/(m=video[^\\n]+\\n)/,"$1b=AS:"+bwKbps+"\\r\\n");',
     '    }',
@@ -746,8 +775,10 @@ function buildMenu(): Menu {
 }
 
 // Enable hardware video encoding for WebRTC (NVENC, AMF, QSV)
+// - MediaFoundationAV1Encoding / WebRtcAV1HWEncode: expose NVENC AV1 hardware encode to WebRTC (disabled by default on Windows)
+// - PlatformHEVCEncoderSupport: allow H.265/HEVC encode (NVENC HEVC)
 app.commandLine.appendSwitch('enable-features',
-  'PlatformHEVCEncoderSupport,MediaFoundationVideoCapture,WebRtcH264WithOpenH264FFmpeg,VaapiVideoEncoder,VaapiVideoDecoder');
+  'PlatformHEVCEncoderSupport,MediaFoundationVideoCapture,MediaFoundationAV1Encoding,WebRtcAV1HWEncode,WebRtcH264WithOpenH264FFmpeg,VaapiVideoEncoder,VaapiVideoDecoder');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('webrtc-max-cpu-consumption-percentage', '100');
@@ -758,7 +789,44 @@ app.commandLine.appendSwitch('force-fieldtrials',
   'WebRTC-Video-Pacing/Enabled/'
 );
 
+// ---- Self-test mode (no server, no UI interaction) ------------------------------------
+// Run with: electron . --selftest [--selftest-out=C:\path\report.json]
+// Opens a tiny window, runs local WebRTC loopbacks for each codec (single +
+// 3-layer simulcast), reads getStats() for encoderImplementation, writes a JSON
+// report, then quits. Lets the agent verify hardware encoding without a human.
+function runSelfTest(): void {
+  const outPath = app.commandLine.getSwitchValue('selftest-out') ||
+    path.join(app.getPath('userData'), 'codec-selftest-report.json');
+  process.stdout.write(`[selftest] writing report to ${outPath}\n`);
+
+  const win = new BrowserWindow({
+    width: 540, height: 440, show: true, title: 'Sharkov Codec Self-Test',
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  win.setMenuBarVisibility(false);
+  win.loadFile(path.join(__dirname, '..', 'static', 'selftest.html'));
+
+  // Relay renderer console to stdout for live visibility.
+  win.webContents.on('console-message', (_e, ...args: unknown[]) => {
+    const msg = args.length >= 2 ? (args[1] as string) : ((args[0] as { message?: string })?.message ?? String(args[0]));
+    process.stdout.write(`[selftest] ${msg}\n`);
+  });
+
+  ipcMain.once('selftest-report', (_e, report: unknown) => {
+    try {
+      mkdirSync(path.dirname(outPath), { recursive: true });
+      writeFileSync(outPath, JSON.stringify(report, null, 2));
+      process.stdout.write(`[selftest] report written to ${outPath}\n`);
+    } catch (err) {
+      process.stdout.write(`[selftest] failed to write report: ${err}\n`);
+    }
+    try { win.close(); } catch {}
+    app.quit();
+  });
+}
+
 app.whenReady().then(async () => {
+  if (app.commandLine.hasSwitch('selftest')) { runSelfTest(); return; }
   const StoreImpl = (await import('electron-store')).default;
   store = new StoreImpl<{ serverUrl: string; savedServers: string }>({
     defaults: { serverUrl: 'https://demo.sharkord.com', savedServers: '[]' }
