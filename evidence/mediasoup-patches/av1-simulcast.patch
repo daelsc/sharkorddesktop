@@ -1,0 +1,10 @@
+--- /tmp/ms-orig/package/worker/include/RTC/RTP/Codecs/Tools.hpp	1985-10-26 01:15:00.000000000 -0700
++++ /mnt/c/Users/dave/git/sharkorddesktop/evidence/mediasoup-patches/Tools.hpp.patched	2026-07-25 12:13:05.652703100 -0700
+@@ -133,6 +133,7 @@
+ 									{
+ 										case RTC::RtpCodecMimeType::Subtype::VP8:
+ 										case RTC::RtpCodecMimeType::Subtype::H264:
++												case RTC::RtpCodecMimeType::Subtype::AV1:
+ 										{
+ 											return true;
+ 										}

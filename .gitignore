@@ -13,3 +13,6 @@ selftest-report*.json
 
 # Live self-test generated reports
 live-selftest-*.json
+
+# patched mediasoup worker binary (10MB, built locally)
+evidence/mediasoup-patches/mediasoup-worker-av1-simulcast
