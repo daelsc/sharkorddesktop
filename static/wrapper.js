@@ -2139,39 +2139,8 @@
         } catch (_) {}
       });
     });
-    var codecLabel = document.createElement('span');
-    codecLabel.textContent = 'Codec';
-    codecLabel.style.cssText = 'font-size:11px;color:#a1a1aa;margin-left:8px;';
-    var codecSelect = document.createElement('select');
-    codecSelect.style.cssText = 'background:#27272a;color:#e4e4e7;border:1px solid #3f3f46;border-radius:4px;font-size:11px;padding:2px 4px;cursor:pointer;outline:none;';
-    ['AUTO', 'H264', 'H265', 'VP8', 'VP9', 'AV1'].forEach(function (c) {
-      var o = document.createElement('option');
-      o.value = c;
-      o.textContent = c;
-      codecSelect.appendChild(o);
-    });
-    if (api.getVideoCodec) {
-      api.getVideoCodec().then(function (codec) {
-        codecSelect.value = codec || 'H264';
-      });
-    }
-    codecSelect.addEventListener('change', function () {
-      var codec = codecSelect.value;
-      if (api.setVideoCodec) api.setVideoCodec(codec);
-      var frames = document.querySelectorAll('.client-frame');
-      frames.forEach(function (frame) {
-        try {
-          if (frame.contentWindow) {
-            frame.contentWindow.postMessage({ type: 'sharkord-set-video-codec', codec: codec }, '*');
-          }
-        } catch (_) {}
-      });
-    });
-
     bitrateBar.appendChild(bitrateLabel);
     bitrateBar.appendChild(bitrateSelect);
-    bitrateBar.appendChild(codecLabel);
-    bitrateBar.appendChild(codecSelect);
     container.style.position = 'relative';
     container.appendChild(bitrateBar);
   }
