@@ -29,10 +29,13 @@
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "@sapphi-red/web-noise-suppressor": "^0.3.5",
+    "@trpc/client": "^11.6.0",
+    "@trpc/server": "^11.6.0",
     "@types/node": "^22.0.0",
     "electron": "39.2.7",
     "electron-builder": "^25.0.0",
     "eslint": "^9.18.0",
+    "mediasoup-client": "^3.18.0",
     "terser": "^5.36.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.21.0",

@@ -790,21 +790,55 @@ app.commandLine.appendSwitch('force-fieldtrials',
 );
 
 // ---- Self-test mode (no server, no UI interaction) ------------------------------------
-// Run with: electron . --selftest [--selftest-out=C:\path\report.json]
-// Opens a tiny window, runs local WebRTC loopbacks for each codec (single +
-// 3-layer simulcast), reads getStats() for encoderImplementation, writes a JSON
-// report, then quits. Lets the agent verify hardware encoding without a human.
+// Loopback mode:  electron . --selftest [--selftest-out=...]
+// Live mode:      electron . --selftest-live --selftest-token=<path-to-JWT-file> \
+//                 [--selftest-host=sharkord.thesemite.com] [--selftest-channel=5] \
+//                 [--selftest-codec=VP8] [--selftest-kind=screen] [--selftest-simulcast=1]
+//                 [--selftest-out=...]
+// Loopback opens a tiny window and runs local WebRTC loopbacks per codec (single +
+// 3-layer simulcast) to verify hardware encoding without a server. Live mode connects
+// to a real sharkord mediasoup server over tRPC/WebSocket, joins a voice channel,
+// produces a (simulcast) stream, and samples getStats() to prove end-to-end simulcast
+// + hardware. Both modes write a JSON report and quit — no human interaction.
 function runSelfTest(): void {
+  const live = app.commandLine.hasSwitch('selftest-live');
   const outPath = app.commandLine.getSwitchValue('selftest-out') ||
-    path.join(app.getPath('userData'), 'codec-selftest-report.json');
-  process.stdout.write(`[selftest] writing report to ${outPath}\n`);
+    path.join(app.getPath('userData'), live ? 'live-selftest-report.json' : 'codec-selftest-report.json');
+  process.stdout.write(`[selftest] mode=${live ? 'live' : 'loopback'} writing report to ${outPath}\n`);
+
+  // Build the query string for live mode. The JWT is read from the token file here
+  // (main process) and passed via the URL so the renderer never touches the filesystem.
+  let token = '';
+  if (live) {
+    const tokenPath = app.commandLine.getSwitchValue('selftest-token');
+    if (tokenPath) {
+      try { token = readFileSync(tokenPath, 'utf8').trim(); }
+      catch (err) { process.stdout.write(`[selftest] failed to read token file: ${err}\n`); }
+    }
+    if (!token) {
+      process.stdout.write('[selftest] live mode requires --selftest-token=<path>\n');
+      app.quit(); return;
+    }
+  }
+  const query: Record<string, string> = {};
+  if (live) {
+    query['mode'] = 'live';
+    query['token'] = token;
+    query['host'] = app.commandLine.getSwitchValue('selftest-host') || 'sharkord.thesemite.com';
+    query['channel'] = app.commandLine.getSwitchValue('selftest-channel') || '5';
+    query['codec'] = app.commandLine.getSwitchValue('selftest-codec') || 'VP8';
+    query['kind'] = app.commandLine.getSwitchValue('selftest-kind') || 'screen';
+    query['simulcast'] = app.commandLine.getSwitchValue('selftest-simulcast') || '1';
+    query['svc'] = app.commandLine.getSwitchValue('selftest-svc') || '';
+    query['sampleMs'] = app.commandLine.getSwitchValue('selftest-sample-ms') || '15000';
+  }
 
   const win = new BrowserWindow({
-    width: 540, height: 440, show: true, title: 'Sharkov Codec Self-Test',
+    width: 600, height: 560, show: true, title: live ? 'Sharkov Live Self-Test' : 'Sharkov Codec Self-Test',
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
   win.setMenuBarVisibility(false);
-  win.loadFile(path.join(__dirname, '..', 'static', 'selftest.html'));
+  win.loadFile(path.join(__dirname, '..', 'static', 'selftest.html'), { query });
 
   // Relay renderer console to stdout for live visibility.
   win.webContents.on('console-message', (_e, ...args: unknown[]) => {
@@ -826,7 +860,7 @@ function runSelfTest(): void {
 }
 
 app.whenReady().then(async () => {
-  if (app.commandLine.hasSwitch('selftest')) { runSelfTest(); return; }
+  if (app.commandLine.hasSwitch('selftest') || app.commandLine.hasSwitch('selftest-live')) { runSelfTest(); return; }
   const StoreImpl = (await import('electron-store')).default;
   store = new StoreImpl<{ serverUrl: string; savedServers: string }>({
     defaults: { serverUrl: 'https://demo.sharkord.com', savedServers: '[]' }

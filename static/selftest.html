@@ -15,6 +15,13 @@
 <div id="log"></div>
 <canvas id="c" width="1280" height="720"></canvas>
 <video id="v" autoplay muted playsinline></video>
-<script src="selftest.js"></script>
+<script>
+  // Branch on ?mode=live to load the real-server mediasoup harness; otherwise
+  // run the local loopback codec self-test.
+  var s = document.createElement('script');
+  s.src = new URLSearchParams(location.search).get('mode') === 'live'
+    ? 'selftest-live.js' : 'selftest.js';
+  document.body.appendChild(s);
+</script>
 </body>
 </html>

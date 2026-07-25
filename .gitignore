@@ -10,3 +10,6 @@ docs/
 
 # Self-test generated reports
 selftest-report*.json
+
+# Live self-test generated reports
+live-selftest-*.json
