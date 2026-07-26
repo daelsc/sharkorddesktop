@@ -30,14 +30,34 @@ function wait(ms){return new Promise(r=>setTimeout(r,ms));}
 
 // ---- extract + load the REAL webrtc-stats injection from dist/main.js ----
 function loadRealInjection() {
-  const distPath = path.join(__dirname, '..', 'dist', 'main.js');
+  // Load the real builder module (compiled to dist/webrtcStatsInjection.js by tsc)
+  // and the real device-prefs reader, then build the injection exactly as the app does.
+  // This replaces the old brace-scraping of dist/main.js, which broke once main.ts
+  // delegates to the module (the scraped code could not resolve the import binding).
+  const distDir = path.join(__dirname, '..', 'dist');
+  let builderMod, prefsSrc;
+  try {
+    // In the renderer (nodeIntegration), require resolves dist modules.
+    builderMod = require(path.join(distDir, 'webrtcStatsInjection.js'));
+  } catch (e) {
+    // Fallback: build dist in-memory by transpiling the TS source is not available
+    // without tsc; instead read the compiled JS and eval it as a module.
+    const fs2 = require('fs');
+    const code = fs2.readFileSync(path.join(distDir, 'webrtcStatsInjection.js'), 'utf8');
+    const m = { exports: {} };
+    (new Function('module', 'exports', 'require', code))(m, m.exports, require);
+    builderMod = m.exports;
+  }
+  // Read getDevicePreferences from dist/main.js via brace scrape (still works: it's
+  // a self-contained function reading the module-level store).
+  const distPath = path.join(distDir, 'main.js');
   const src = fs.readFileSync(distPath, 'utf8');
   function ex(n){const s=src.indexOf('function '+n+'(');let b=src.indexOf('{',s);let d=0,e=b;for(;e<src.length;e++){if(src[e]==='{')d++;else if(src[e]==='}'){d--;if(d===0)break;}}return src.slice(s,e+1);}
-  const g = ex('getDevicePreferences'), i = ex('getWebrtcStatsInjectionCode');
-  const ctx2 = { store: null, DEVICE_PREFS_KEY: 'x', getDevicePreferences: null, getWebrtcStatsInjectionCode: null };
-  vm.createContext(ctx2); vm.runInContext(g + '\n' + i + '\n', ctx2);
+  const g = ex('getDevicePreferences');
+  const ctx2 = { store: null, DEVICE_PREFS_KEY: 'x', getDevicePreferences: null, getWebrtcStatsInjectionCode: null, buildWebrtcStatsInjection: builderMod.buildWebrtcStatsInjection };
+  vm.createContext(ctx2); vm.runInContext(g + '\n' + 'getWebrtcStatsInjectionCode = function(){ var prefs = getDevicePreferences(); var forcedBps = (prefs.videoBitrate && prefs.videoBitrate>0) ? prefs.videoBitrate*1000 : 0; var forcedCodec = prefs.videoCodec || "H264"; return buildWebrtcStatsInjection({forcedBps: forcedBps, forcedCodec: forcedCodec}); }' + '\n', ctx2);
   const code = ctx2.getWebrtcStatsInjectionCode();
-  out('loaded real injection (len=' + code.length + ')');
+  out('loaded real injection via module (len=' + code.length + ')');
   // eval it in THIS window so it wraps RTCPeerConnection + installs the message handler
   (0, eval)(code);
   out('injection installed: statsHook=' + !!window.__sharkordRtcStatsHooked);

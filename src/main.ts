@@ -5,6 +5,7 @@ import { NsisUpdater } from 'electron-updater';
 import { pathToFileURL } from 'node:url';
 import * as processAudio from './processAudioBridge.js';
 import { saveCredentials, loadCredentials, clearCredentials, type CredentialCrypto } from './credentials.js';
+import { buildWebrtcStatsInjection, buildSimulcastCodecInjection } from './webrtcStatsInjection.js';
 
 function getBuildId(): string {
   return app.getVersion();
@@ -334,197 +335,20 @@ function getAutoLoginInjectionCode(): string {
     '})();'
   ].join('');
 }
-
+// Build the webrtc-stats + control injection (codec force, live bitrate cap,
+// SDP bw forcing, stats loop). The string builder + unit tests live in
+// webrtcStatsInjection.ts so the bitrate-cap algorithm (setParameters transactionId
+// invariant) is regression-tested in vitest without Electron.
 function getWebrtcStatsInjectionCode(): string {
   const prefs = getDevicePreferences();
-  const FORCED_BPS = (prefs.videoBitrate && prefs.videoBitrate > 0) ? prefs.videoBitrate * 1000 : 0; // kbps->bps; 0/Auto = no force (let Chromium's estimator decide)
-  const FORCED_CODEC = JSON.stringify(prefs.videoCodec || 'H264');
-  return [
-    '(function(){if(window.__sharkordRtcStatsHooked)return;window.__sharkordRtcStatsHooked=true;',
-    'var OrigPC=window.RTCPeerConnection;if(!OrigPC)return;',
-    'var pcs=[];',
-    'var FORCED_BPS=' + FORCED_BPS + ';',
-    'var FORCED_CODEC=' + FORCED_CODEC + ';',
-
-    // Force preferred codec on transceivers. Applies to simulcast senders too —
-    // we PROVED Chromium + NVENC do 3-layer H264 simulcast (1080p), so forcing H264
-    // via setCodecPreferences makes the desktop default take effect. setCodecPreferences
-    // does NOT use a transactionId (unlike setParameters), so it's safe to call here.
-    // "AUTO" means let the app decide (no forcing).
-    'function forceCodec(pc){',
-    '  if(!FORCED_CODEC||FORCED_CODEC==="AUTO")return;',
-    '  try{var transceivers=pc.getTransceivers();',
-    '  transceivers.forEach(function(t){',
-    '    if(!t.sender||!t.sender.track||t.sender.track.kind!=="video")return;',
-    // Apply to simulcast senders too: we PROVED Chromium + NVENC do 3-layer H264',
-    // simulcast (1080p). Forcing the chosen codec via setCodecPreferences makes',
-    // the desktop app\'s codec selection (default H264) take effect for simulcast',
-    // WITHOUT depending on the server SPA bundle patch (which gets wiped on',
-    // container restart). This is the restart-safe path.',
-    '    if(!OrigPC.getCapabilities)return;',
-    '    var caps=OrigPC.getCapabilities("video");',
-    '    if(!caps||!caps.codecs)return;',
-    '    var mime="video/"+FORCED_CODEC;',
-    // Include RTX so retransmission keeps working on the forced codec.',
-    '    var preferred=caps.codecs.filter(function(c){return c.mimeType===mime||c.mimeType==="video/rtx";});',
-    '    if(preferred.length>0)try{t.setCodecPreferences(preferred);}catch(e){}',
-    '  });}catch(e){}',
-    '}',
-
-    // Apply bitrate limits. Two paths:
-    //  - SIMULCAST (screen share): cap the HIGH layer's maxBitrate only, leaving the
-    //    low/mid layers alone so the SFU can still subscribe to lower quality. This
-    //    is applied LIVE via setParameters (no reload needed) — verified by the
-    //    --selftest-bitrate harness (10Mbps->high.maxBitrate=10000000, Auto->removed).
-    //    Auto (FORCED_BPS=0) = remove the cap so the bandwidth estimator decides.
-    //  - SINGLE-stream (webcam): force min=max=FORCED_BPS + maintain-resolution to
-    //    bypass the bandwidth estimator (desired for LAN). Auto = leave it alone.
-    'function applyBitrateLimits(pc){',
-    '  try{pc.getSenders().forEach(function(s){',
-    '    if(!s.track||s.track.kind!=="video")return;',
-    '    var p=s.getParameters();',
-    '    if(!p.encodings||p.encodings.length===0)p.encodings=[{}];',
-    // Detect simulcast from THIS p (do NOT call isSimulcastSender, which would call
-    // getParameters again and invalidate p's transactionId, causing setParameters to
-    // reject). rid or scaleResolutionDownBy>1 on any encoding => simulcast.
-    '    var sim=false;for(var si=0;si<p.encodings.length;si++){var se=p.encodings[si];if(se.rid||(se.scaleResolutionDownBy&&se.scaleResolutionDownBy>1)){sim=true;break;}}',
-    '    if(sim){',
-    '      var encs=p.encodings;var high=encs[encs.length-1];',
-    '      for(var i=0;i<encs.length;i++){if(encs[i].scaleResolutionDownBy===1)high=encs[i];}',
-    '      var lc=false;',
-    '      if(FORCED_BPS>0){if(high.maxBitrate!==FORCED_BPS){high.maxBitrate=FORCED_BPS;lc=true;}}',
-    '      else{if("maxBitrate" in high){delete high.maxBitrate;lc=true;}}',
-    '      if(lc)s.setParameters(p).catch(function(){});',
-    '      return;',
-    '    }',
-    '    if(!FORCED_BPS)return;',
-    '    if(p.encodings.length>1)return;',
-    '    var enc=p.encodings[0];var changed=false;',
-    '    if(enc.maxBitrate!==FORCED_BPS){enc.maxBitrate=FORCED_BPS;changed=true;}',
-    '    if(enc.minBitrate!==FORCED_BPS){enc.minBitrate=FORCED_BPS;changed=true;}',
-    '    if(!p.degradationPreference||p.degradationPreference!=="maintain-resolution"){',
-    '      p.degradationPreference="maintain-resolution";changed=true;}',
-    '    if(changed)s.setParameters(p).catch(function(){});',
-    '  });}catch(e){}',
-    '}',
-
-    // Force bandwidth in SDP — but skip simulcast m-lines. A single b=AS cap on a
-    // simulcast m-line throttles the aggregate across all layers and can starve the
-    // high layer; the per-layer encodings already express intent. Chromium marks
-    // simulcast sections with `a=simulcast`, so detect on that.
-    'function forceSdpBandwidth(sdp){',
-    '  if(!sdp||!FORCED_BPS)return sdp;',
-    '  var bwKbps=Math.round(FORCED_BPS/1000);',
-    '  var sections=sdp.split(/(?=m=)/);',
-    '  for(var i=0;i<sections.length;i++){',
-    '    if(sections[i].indexOf("m=video")===0){',
-    '      if(/a=simulcast/i.test(sections[i]))continue;',
-    '      sections[i]=sections[i].replace(/b=AS:\\d+\\r?\\n/g,"");',
-    '      sections[i]=sections[i].replace(/(m=video[^\\n]+\\n)/,"$1b=AS:"+bwKbps+"\\r\\n");',
-    '    }',
-    '  }',
-    '  return sections.join("");',
-    '}',
-
-    // Wrap RTCPeerConnection
-    'window.RTCPeerConnection=function(){',
-    '  var args=Array.prototype.slice.call(arguments);',
-    '  var pc=new(Function.prototype.bind.apply(OrigPC,[null].concat(args)));',
-    '  pcs.push(pc);',
-    '  pc.addEventListener("connectionstatechange",function(){',
-    '    if(pc.connectionState==="closed"||pc.connectionState==="failed")pcs=pcs.filter(function(p){return p!==pc;});',
-    '  });',
-
-    // Wrap setLocalDescription to force bandwidth in SDP
-    '  var origSLD=pc.setLocalDescription.bind(pc);',
-    '  pc.setLocalDescription=function(desc){',
-    '    if(desc&&desc.sdp)desc=Object.assign({},desc,{sdp:forceSdpBandwidth(desc.sdp)});',
-    '    return origSLD.call(this,desc);',
-    '  };',
-
-    // On track added, force H264 and apply bitrate
-    '  pc.addEventListener("track",function(){forceCodec(pc);applyBitrateLimits(pc);});',
-    '  var origAddTrack=pc.addTrack.bind(pc);',
-    '  pc.addTrack=function(){var r=origAddTrack.apply(this,arguments);forceCodec(pc);applyBitrateLimits(pc);return r;};',
-
-    // Wrap createOffer to force H264 before offer
-    '  var origCreateOffer=pc.createOffer.bind(pc);',
-    '  pc.createOffer=function(){forceCodec(pc);return origCreateOffer.apply(this,arguments);};',
-
-    '  return pc;',
-    '};',
-    'window.RTCPeerConnection.prototype=OrigPC.prototype;',
-    'Object.keys(OrigPC).forEach(function(k){try{window.RTCPeerConnection[k]=OrigPC[k];}catch(e){}});',
-
-    // Bitrate message handler (override from UI)
-    'window.addEventListener("message",function(e){',
-    '  if(e.data&&e.data.type==="sharkord-set-video-bitrate"&&typeof e.data.bps==="number"){FORCED_BPS=e.data.bps;pcs.forEach(function(pc){applyBitrateLimits(pc);});}',
-    '  if(e.data&&e.data.type==="sharkord-set-video-codec"&&typeof e.data.codec==="string"){FORCED_CODEC=e.data.codec;pcs.forEach(function(pc){forceCodec(pc);});}',
-    '});',
-
-    // Stats loop
-    'var prev={};',
-    'setInterval(function(){pcs.forEach(function(pc,idx){if(pc.connectionState==="closed")return;',
-    'applyBitrateLimits(pc);',
-    'pc.getStats().then(function(stats){var report={pc:idx,audio_out:null,video_out:null,audio_in:null,video_in:null};',
-    'stats.forEach(function(s){',
-    'if(s.type==="outbound-rtp"&&s.bytesSent!==undefined){',
-    'var key=idx+"_"+s.id;var p=prev[key];var bps=0;',
-    'if(p){var dt=(s.timestamp-p.ts)/1000;if(dt>0)bps=8*(s.bytesSent-p.bytes)/dt;}',
-    'prev[key]={ts:s.timestamp,bytes:s.bytesSent};',
-    'var codecName="";if(s.codecId){var cs=stats.get(s.codecId);if(cs)codecName=cs.mimeType||"";}',
-    'var info={bitrate:Math.round(bps),codec:codecName||s.codecId||"",frameRate:s.framesPerSecond||0,width:s.frameWidth||0,height:s.frameHeight||0,packets:s.packetsSent||0,nacks:s.nackCount||0,plis:s.pliCount||0,firs:s.firCount||0,retransmitted:s.retransmittedBytesSent||0,qpSum:s.qpSum||0,framesEncoded:s.framesEncoded||0,encoderImplementation:s.encoderImplementation||""};',
-    'if(s.kind==="audio"||s.mediaType==="audio")report.audio_out=info;',
-    'else if(s.kind==="video"||s.mediaType==="video")report.video_out=info;',
-    '}',
-    'if(s.type==="inbound-rtp"&&s.bytesReceived!==undefined){',
-    'var key2=idx+"_"+s.id;var p2=prev[key2];var bps2=0;',
-    'if(p2){var dt2=(s.timestamp-p2.ts)/1000;if(dt2>0)bps2=8*(s.bytesReceived-p2.bytes)/dt2;}',
-    'prev[key2]={ts:s.timestamp,bytes:s.bytesReceived};',
-    'var codecName2="";if(s.codecId){var cs2=stats.get(s.codecId);if(cs2)codecName2=cs2.mimeType||"";}',
-    'var info2={bitrate:Math.round(bps2),codec:codecName2||s.codecId||"",packetsLost:s.packetsLost||0,jitter:s.jitter||0,frameRate:s.framesPerSecond||0,width:s.frameWidth||0,height:s.frameHeight||0};',
-    'if(s.kind==="audio"||s.mediaType==="audio")report.audio_in=info2;',
-    'else if(s.kind==="video"||s.mediaType==="video")report.video_in=info2;',
-    '}',
-    '});',
-    'if(report.audio_out||report.video_out||report.audio_in||report.video_in){',
-    'try{window.parent.postMessage({type:"sharkord-rtc-stats",report:report},"*");}catch(e){}',
-    '}',
-    '}).catch(function(){});});},2000);',
-
-    '})();'
-  ].join('');
+  const forcedBps = (prefs.videoBitrate && prefs.videoBitrate > 0) ? prefs.videoBitrate * 1000 : 0;
+  const forcedCodec = prefs.videoCodec || "H264";
+  return buildWebrtcStatsInjection({ forcedBps, forcedCodec });
 }
-
-// Inject a hook that defaults the SPA's simulcast codec to H264 (NVENC) on load.
-// There is no codec selector UI anymore — H264 hardware simulcast is the desktop
-// default. The SPA's DevicesProvider rehydrates `screenCodec` from localStorage only
-// on mount, so on load we ensure `sharkord-devices-settings`.screenCodec is
-// video/H264. If it isn't (fresh install = "auto", or a prior non-H264 value), we
-// write H264 and reload the SPA ONCE so the provider rehydrates it. The reload is
-// self-limiting: after it, screenCodec is already H264, so the guard doesn't fire
-// again (no loop). This runs only in the desktop app's SPA frame (injected by the
-// main process); web browser clients are unaffected and keep their own default.
-//
-// NOTE: the Bitrate selector is handled separately by the webrtc-stats injection
-// (applyBitrateLimits), which caps the high simulcast layer LIVE via setParameters
-// — no reload, works mid-share. So this codec injection does NOT touch bitrate.
+// Default the SPA simulcast codec to H264 (NVENC) on load. Pure builder + tests:
+// see webrtcStatsInjection.ts (buildSimulcastCodecInjection).
 function getSimulcastCodecInjectionCode(): string {
-  return [
-    '(function(){if(window.__sharkordSimulcastCodecHooked)return;window.__sharkordSimulcastCodecHooked=true;',
-    'var KEY="sharkord-devices-settings";',
-    'try{',
-    '  var raw=localStorage.getItem(KEY);',
-    '  var o=raw?JSON.parse(raw):{};',
-    '  if(o.screenCodec!=="video/H264"){',
-    '    o.screenCodec="video/H264";',
-    '    localStorage.setItem(KEY,JSON.stringify(o));',
-    '    console.log("[Sharkov] defaulting simulcast screenCodec to video/H264");',
-    '    window.location.reload();',
-    '  }',
-    '}catch(e){}',
-    '})();'
-  ].join('');
+  return buildSimulcastCodecInjection();
 }
 
 function injectDevicePrefsIntoFrame(frame: { url: string; executeJavaScript: (code: string) => Promise<unknown> }): void {
