@@ -404,10 +404,6 @@ function setPttPressed(pressed: boolean): void {
   pttPressed = pressed;
 }
 
-function registerPttGlobalShortcut(): void {
-  /* No-op; background PTT is started on window blur (Windows only). */
-}
-
 function unregisterPttGlobalShortcut(): void {
   if (pttBackgroundStop) {
     pttBackgroundStop();
@@ -811,10 +807,7 @@ app.whenReady().then(async () => {
 
   setupMediaPermissions();
   Menu.setApplicationMenu(buildMenu());
-  createMainWindow();
-  registerPttGlobalShortcut();
-
-  // Auto-update (only works with NSIS installer, not portable exe)
+  createMainWindow();  // Auto-update (only works with NSIS installer, not portable exe)
   const autoUpdater = new NsisUpdater({
     provider: 'github',
     owner: 'daelsc',
@@ -1115,14 +1108,10 @@ ipcMain.handle('get-device-preferences', () => getDevicePreferences());
 
 ipcMain.handle('set-device-preferences', (_event, prefs: DevicePreferences) => {
   setDevicePreferences(prefs ?? {});
-  injectDevicePrefsIntoFrames();
-  registerPttGlobalShortcut();
-});
+  injectDevicePrefsIntoFrames();});
 
 ipcMain.handle('request-apply-device-preferences', () => {
-  injectDevicePrefsIntoFrames();
-  registerPttGlobalShortcut();
-});
+  injectDevicePrefsIntoFrames();});
 
 ipcMain.handle('ptt-state', (_event, pressed: boolean) => {
   setPttPressed(!!pressed);
