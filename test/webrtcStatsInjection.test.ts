@@ -205,6 +205,22 @@ describe('buildWebrtcStatsInjection — single-stream bitrate force', () => {
     w._handlers.find((x: any) => x.type === 'message')!.fn({ data: { type: 'sharkord-set-video-bitrate', bps: 0 } });
     expect(sender._setCalls.length).toBe(0); // nothing to change
   });
+  it('SVC (single encoding with scalabilityMode) caps maxBitrate only, never sets minBitrate', () => {
+    // AV1/VP9 SVC: one encoding with scalabilityMode=L3T3. Forcing minBitrate would
+    // destroy the internal spatial-layer allocation; only maxBitrate should change.
+    const sender = makeSender('video', [{ scalabilityMode: 'L3T3', maxBitrate: 4000000 }]);
+    const pc = makePc([sender]);
+    const w = freshWindow(pc);
+    runInjection(buildWebrtcStatsInjection({ forcedBps: 6000000, forcedCodec: 'H264' }), w);
+    constructPc(w);
+    w._handlers.find((x: any) => x.type === 'message')!.fn({ data: { type: 'sharkord-set-video-bitrate', bps: 6000000 } });
+    expect(sender._setCalls.length).toBe(1);
+    const sent = sender._setCalls[0];
+    expect(sent.encodings[0].maxBitrate).toBe(6000000);
+    expect('minBitrate' in sent.encodings[0]).toBe(false); // SVC: never set minBitrate
+    expect(sent.degradationPreference).toBeUndefined(); // SVC: don't force degradation pref
+    expect(sender._rejections).toEqual([]);
+  });
 });
 
 describe('buildWebrtcStatsInjection — SDP bandwidth forcing', () => {
