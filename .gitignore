@@ -19,3 +19,6 @@ evidence/mediasoup-patches/mediasoup-worker-av1-simulcast
 
 # sharkord bot account token for the stream inspector (minted server-side)
 .bot-token
+
+# review-agent findings (ephemeral)
+reviews/
