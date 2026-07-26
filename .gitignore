@@ -22,3 +22,6 @@ evidence/mediasoup-patches/mediasoup-worker-av1-simulcast
 
 # review-agent findings (ephemeral)
 reviews/
+
+# pi-subagent scratch/artifacts (ephemeral)
+.pi-subagents/
