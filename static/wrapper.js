@@ -1166,15 +1166,14 @@
     puck.addEventListener('mousedown', function (e) {
       e.preventDefault();
       dragging = true;
-    });
-    document.addEventListener('mousemove', function move(e) {
-      if (!dragging) return;
-      updateFromMouse(e);
-    });
-    document.addEventListener('mouseup', function up() {
-      if (dragging) dragging = false;
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
+      function move(ev) { if (!dragging) return; updateFromMouse(ev); }
+      function up() {
+        dragging = false;
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
     });
   }
 
@@ -1220,15 +1219,14 @@
     puck.addEventListener('mousedown', function (e) {
       e.preventDefault();
       dragging = true;
-    });
-    document.addEventListener('mousemove', function move(e) {
-      if (!dragging) return;
-      updateFromMouse(e);
-    });
-    document.addEventListener('mouseup', function up() {
-      if (dragging) dragging = false;
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
+      function move(ev) { if (!dragging) return; updateFromMouse(ev); }
+      function up() {
+        dragging = false;
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
     });
   }
 
@@ -1270,7 +1268,7 @@
     }
     if (binding.indexOf('Key') === 0) {
       var key = binding.slice(3);
-      return key.length === 1 ? key : key;
+      return key;
     }
     var friendly = {
       BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';',
@@ -1479,56 +1477,6 @@
   function dbToX(db, width) {
     var t = (db - DB_MIN) / (DB_MAX - DB_MIN);
     return Math.max(0, Math.min(width, t * width));
-  }
-
-  function drawDbMeter(ctx, width, height, db, fillColor) {
-    ctx.fillStyle = '#18181b';
-    ctx.fillRect(0, 0, width, height);
-    var x = dbToX(db, width);
-    ctx.fillStyle = fillColor;
-    ctx.fillRect(0, 0, x, height);
-    ctx.strokeStyle = '#3f3f46';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0, 0, width, height);
-  }
-
-  function addVolumeSlider(panel, labelText, valuePct, onChange) {
-    var row = document.createElement('div');
-    row.className = 'device-test-volume-row';
-    var label = document.createElement('label');
-    label.textContent = labelText;
-    row.appendChild(label);
-    var slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = 0;
-    slider.max = 200;
-    slider.value = valuePct;
-    slider.addEventListener('input', function () { onChange(Number(slider.value)); });
-    row.appendChild(slider);
-    var span = document.createElement('span');
-    span.style.fontSize = '12px';
-    span.style.color = '#a1a1aa';
-    span.style.minWidth = '36px';
-    span.textContent = valuePct + '%';
-    slider.addEventListener('input', function () {
-      var v = Number(slider.value);
-      span.textContent = v + '%';
-      onChange(v);
-    });
-    row.appendChild(span);
-    panel.appendChild(row);
-  }
-
-  function addDbLabels(panel) {
-    var div = document.createElement('div');
-    div.className = 'device-test-db-labels';
-    var left = document.createElement('span');
-    left.textContent = DB_MIN + ' dB';
-    var right = document.createElement('span');
-    right.textContent = DB_MAX + ' dB';
-    div.appendChild(left);
-    div.appendChild(right);
-    panel.appendChild(div);
   }
 
   function testInputDevice() {
