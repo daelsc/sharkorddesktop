@@ -167,6 +167,15 @@ function createMainWindow(): void {
     return { action: 'deny' };
   });
 
+  // Lock the TOP frame to the file:// wrapper. The privileged preload bridge
+  // (sharkordDesktop API incl. credential access) is bound to this window
+  // regardless of the loaded page's origin, so if the top frame ever navigates
+  // to a remote https:// origin, that page would inherit the bridge. Only the
+  // SPA iframes should ever navigate; the top frame must stay on file://.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file://')) event.preventDefault();
+  });
+
   mainWindow.webContents.on('did-frame-navigate', (_event, url, _httpResponseCode, _httpStatusText, _isMainFrame, frameProcessId, frameRoutingId) => {
     if (!url || url.startsWith('file:')) return;
     const frame = webFrameMain.fromId(frameProcessId, frameRoutingId);
@@ -286,6 +295,9 @@ function getCredentialCaptureInjectionCode(): string {
   return [
     '(function(){if(window.__sharkordCredCaptureHooked)return;window.__sharkordCredCaptureHooked=true;',
     'var origFetch=window.fetch&&window.fetch.bind(window);if(!origFetch)return;',
+    // Capture the parent origin once (before any navigation) so credential-bearing
+    // postMessages are NOT broadcast with "*" to any frame in the parent window.
+    'var parentOrigin="*";try{parentOrigin=window.parent.location.origin;}catch(e){parentOrigin="*";}',
     'window.fetch=function(input,init){',
     'var reqUrl=typeof input==="string"?input:(input&&input.url)||"";',
     'var u;try{u=new URL(reqUrl,location.origin);}catch(e){return origFetch.apply(this,arguments);}',
@@ -295,7 +307,7 @@ function getCredentialCaptureInjectionCode(): string {
     'return origFetch.apply(this,arguments).then(function(resp){',
     'if(resp&&resp.ok&&body&&body.identity&&body.password){',
     'try{',
-    'window.parent.postMessage({type:"sharkord-save-credentials",identity:body.identity,password:body.password},"*");',
+    'window.parent.postMessage({type:"sharkord-save-credentials",identity:body.identity,password:body.password},parentOrigin);',
     '}catch(e){}',
     '}',
     'return resp;',
@@ -309,6 +321,8 @@ function getAutoLoginInjectionCode(): string {
   return [
     '(function(){if(window.__sharkordAutoLoginHooked)return;window.__sharkordAutoLoginHooked=true;',
     'var attempted=false;',
+    // Capture parent origin once; only accept credentials from the trusted parent.
+    'var parentOrigin="*";try{parentOrigin=window.parent.location.origin;}catch(e){parentOrigin="*";}',
     'function hasConnectScreen(){return !!document.querySelector("[data-testid=\\"connect-identity-input\\"]");}',
     'function setNativeValue(el,value){',
     'var proto=el.tagName==="TEXTAREA"?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;',
@@ -316,11 +330,12 @@ function getAutoLoginInjectionCode(): string {
     'if(desc&&desc.set)desc.set.call(el,value);else el.value=value;',
     'el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));',
     '}',
-    'function tryAutoLogin(){if(attempted||!hasConnectScreen())return;attempted=true;window.parent.postMessage({type:"sharkord-request-credentials"},"*");}',
+    'function tryAutoLogin(){if(attempted||!hasConnectScreen())return;attempted=true;window.parent.postMessage({type:"sharkord-request-credentials"},parentOrigin);}',
     'setInterval(tryAutoLogin,500);',
     'if(document.body){new MutationObserver(function(){tryAutoLogin();}).observe(document.body,{childList:true,subtree:true});}',
     'else{document.addEventListener("DOMContentLoaded",function(){new MutationObserver(function(){tryAutoLogin();}).observe(document.body,{childList:true,subtree:true});});}',
     'window.addEventListener("message",function(e){',
+    'if(e.origin!==parentOrigin)return;',
     'if(!e.data||e.data.type!=="sharkord-credentials")return;',
     'if(!e.data.identity||!e.data.password)return;',
     'var idEl=document.querySelector("[data-testid=\\"connect-identity-input\\"]");',
@@ -1028,6 +1043,16 @@ ipcMain.handle('desktop-reorder-servers', (_event, orderedIds: string[]) => {
 ipcMain.handle('desktop-get-credentials-for-origin', (_event, origin: string) => {
   const crypto = getCredentialCrypto();
   if (!crypto) return null;
+  // Validate the requested origin is a known saved server before decrypting.
+  // Without this, any renderer-side compromise could request credentials for an
+  // arbitrary origin. The wrapper's own check is renderer-side (untrusted).
+  try {
+    const originUrl = new URL(origin);
+    const known = getSavedServers().some((s) => {
+      try { return new URL(s.url).origin === originUrl.origin; } catch { return false; }
+    });
+    if (!known) return null;
+  } catch { return null; }
   return loadCredentials(getSavedServers(), crypto, origin);
 });
 
@@ -1068,7 +1093,7 @@ ipcMain.handle('submit-admin-token', async (_event, token: string, activeServerI
   const wc = mainWindow.webContents;
   const mainFrame = wc.mainFrame;
   const frames = (mainFrame as { frames?: { url: string; executeJavaScript: (code: string) => Promise<unknown> }[] }).frames ?? [];
-  let frameToRun = frames.find((f) => {
+  const frameToRun = frames.find((f) => {
     try {
       const origin = new URL(f.url).origin;
       return targetOrigin ? origin === targetOrigin : true;
@@ -1076,9 +1101,10 @@ ipcMain.handle('submit-admin-token', async (_event, token: string, activeServerI
       return false;
     }
   });
-  if (!frameToRun && frames.length > 0) {
-    frameToRun = frames[0];
-  }
+  // Do NOT fall back to frames[0]: a privileged admin token must only be handed
+  // to the frame whose origin matches the user's selected server. Delivering it to
+  // an unrelated frame (e.g. a different saved server, or an attacker origin the
+  // user added) would leak admin on the intended server to that origin.
   if (frameToRun) {
     const code = `typeof window.useToken === 'function' && window.useToken(${JSON.stringify(trimmed)});`;
     await frameToRun.executeJavaScript(code).catch(() => {});
