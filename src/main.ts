@@ -1040,8 +1040,19 @@ ipcMain.handle('desktop-update-server', (_event, id: string, updates: Partial<Sa
   const list = getSavedServers();
   const idx = list.findIndex((s) => s.id === id);
   if (idx === -1) return list;
+  // Allowlist updatable fields. A compromised renderer could otherwise overwrite
+  // `id` or `url` (redirecting a trusted server to an attacker origin while keeping
+  // its saved credentials + name). `id`/`url` changes must not be possible via this handler.
+  const allowed: Partial<SavedServer> = {};
+  if (updates && typeof updates === 'object') {
+    if (typeof updates.name === 'string') allowed.name = updates.name;
+    if (typeof updates.icon === 'string') allowed.icon = updates.icon;
+    if (typeof updates.keepConnected === 'boolean') allowed.keepConnected = updates.keepConnected;
+    if (typeof updates.identity === 'string') allowed.identity = updates.identity;
+    if (typeof updates.password === 'string') allowed.password = updates.password;
+  }
   const next = [...list];
-  next[idx] = { ...next[idx], ...updates };
+  next[idx] = { ...next[idx], ...allowed };
   setSavedServers(next);
   return getSavedServers();
 });
@@ -1145,10 +1156,16 @@ ipcMain.handle('ptt-state', (_event, pressed: boolean) => {
 
 ipcMain.handle('fetch-communities-database', async (_event, url: string) => {
   if (!url || typeof url !== 'string') return null;
-  const u = url.trim();
-  if (!u.startsWith('http://') && !u.startsWith('https://')) return null;
+  let u: URL;
+  try { u = new URL(url.trim()); }
+  catch { return null; }
+  // SSRF defense: only the known communities host, https only. The host allowlist
+  // also blocks localhost/RFC1918/link-local (the host can't be both the known
+  // public host and a private address).
+  if (u.protocol !== 'https:') return null;
+  if (u.hostname.toLowerCase() !== 'raw.githubusercontent.com') return null;
   try {
-    const res = await fetch(u, {
+    const res = await fetch(u.toString(), {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
     });
