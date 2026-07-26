@@ -210,16 +210,21 @@ export function buildWebrtcStatsInjection(opts: WebrtcStatsInjectionOptions): st
 }
 
 /**
- * Builds the simulcast-codec injection: defaults the SPA's `screenCodec` device
- * setting to video/H264 on load (H264 NVENC is the desktop default). If the stored
- * value isn't H264, writes H264 and reloads the SPA once so DevicesProvider
- * rehydrates it. Self-limiting (no reload loop). Runs only in the desktop SPA
- * frame; web clients keep their own default.
+ * Builds the simulcast-codec injection: (a) defaults the SPA's `screenCodec` device
+ * setting to video/H264 on load (H264 NVENC is the desktop default), and (b) wires
+ * the desktop Bitrate selector to the SPA's `screenBitrate` device setting so the
+ * produce-time maxBitrate matches the selector. The live encoder cap
+ * (applyBitrateLimits in the webrtc-stats injection) caps the active sender, but
+ * the PRODUCER's declared maxBitrate (what the server + consumers see) comes from
+ * the SPA's screenBitrate at produce time — so the selector must write screenBitrate
+ * + reload to rehydrate it. Self-limiting (only reloads when the value actually
+ * changes). Runs only in the desktop SPA frame; web clients keep their own default.
  */
 export function buildSimulcastCodecInjection(): string {
   return [
     '(function(){if(window.__sharkordSimulcastCodecHooked)return;window.__sharkordSimulcastCodecHooked=true;',
     'var KEY="sharkord-devices-settings";',
+    // (a) on load, ensure screenCodec=video/H264 (default); reload once if it changed
     'try{',
     '  var raw=localStorage.getItem(KEY);',
     '  var o=raw?JSON.parse(raw):{};',
@@ -230,6 +235,26 @@ export function buildSimulcastCodecInjection(): string {
     '    window.location.reload();',
     '  }',
     '}catch(e){}',
+    // Ask the desktop wrapper for the current bitrate once we're ready to listen.
+    // This handshake avoids the timing race where the wrapper posts on load before
+    // this listener is registered. The wrapper responds with sharkord-set-video-bitrate.
+    'try{window.parent.postMessage({type:"sharkord-request-bitrate"},"*");}catch(e){}',
+    // Auto (bps=0) = remove the cap (SPA uses its default). A fixed value = cap.
+    // Only reload if the value actually changes (no reload loop, no reload no-op).
+    'function readSettings(){try{return JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){return{}}}',
+    'function writeSettings(o){try{localStorage.setItem(KEY,JSON.stringify(o))}catch(e){}}',
+    'window.addEventListener("message",function(e){',
+    '  if(!e.data||e.data.type!=="sharkord-set-video-bitrate"||typeof e.data.bps!=="number")return;',
+    '  var kbps=e.data.bps>0?Math.round(e.data.bps/1000):0;',
+    '  try{',
+    '    var o=readSettings();',
+    '    var cur=o.screenBitrate;',
+    '    var changed=false;',
+    '    if(kbps===0){ if("screenBitrate" in o){ delete o.screenBitrate; changed=true; } }',
+    '    else { if(cur!==kbps){ o.screenBitrate=kbps; changed=true; } }',
+    '    if(changed){ writeSettings(o); console.log("[Sharkov] set simulcast screenBitrate="+(kbps||"auto")); window.location.reload(); }',
+    '  }catch(err){}',
+    '});',
     '})();'
   ].join('');
 }

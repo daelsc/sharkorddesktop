@@ -305,3 +305,46 @@ describe('buildSimulcastCodecInjection — H264 default on load', () => {
     expect(reloaded).toBe(true);
   });
 });
+
+describe('buildSimulcastCodecInjection — bitrate selector -> screenBitrate (produce-time cap)', () => {
+  function runBitrateMsg(stored, bps) {
+    const store = {};
+    if (stored !== null) store['sharkord-devices-settings'] = JSON.stringify(stored);
+    let reloaded = false;
+    let handler = null;
+    const w = {
+      addEventListener: (type, fn) => { if (type === 'message') handler = fn; },
+      location: { reload: () => { reloaded = true; } }
+    };
+    const sandbox = {
+      window: w,
+      localStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } },
+      console: { log: () => {} }
+    };
+    // Let the injection run fully (registers the bitrate listener). Pre-set
+    // screenCodec=H264 so the on-load H264 default is a no-op (no reload) and only
+    // the bitrate message handler is exercised.
+    vm.runInNewContext(buildSimulcastCodecInjection(), sandbox);
+    if (!handler) throw new Error('bitrate listener not registered');
+    handler({ data: { type: 'sharkord-set-video-bitrate', bps } });
+    return { store, reloaded };
+  }
+  it('writes screenBitrate (kbps) + reloads when a fixed bitrate is set', () => {
+    const { store, reloaded } = runBitrateMsg({ screenCodec: 'video/H264' }, 15000000);
+    expect(JSON.parse(store['sharkord-devices-settings']).screenBitrate).toBe(15000);
+    expect(reloaded).toBe(true);
+  });
+  it('Auto (bps=0) REMOVES screenBitrate + reloads (so the SPA uses its default)', () => {
+    const { store, reloaded } = runBitrateMsg({ screenCodec: 'video/H264', screenBitrate: 15000 }, 0);
+    expect('screenBitrate' in JSON.parse(store['sharkord-devices-settings'])).toBe(false);
+    expect(reloaded).toBe(true);
+  });
+  it('does NOT reload when the value is unchanged (no-op, no reload loop)', () => {
+    const { reloaded } = runBitrateMsg({ screenCodec: 'video/H264', screenBitrate: 15000 }, 15000000);
+    expect(reloaded).toBe(false);
+  });
+  it('Auto when already auto (no screenBitrate) is a no-op (no reload)', () => {
+    const { reloaded } = runBitrateMsg({ screenCodec: 'video/H264' }, 0);
+    expect(reloaded).toBe(false);
+  });
+});

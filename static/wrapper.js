@@ -2074,10 +2074,8 @@
     api.getVideoBitrate().then(function (kbps) {
       bitrateSelect.value = String(kbps || 0);
     });
-    bitrateSelect.addEventListener('change', function () {
-      var kbps = parseInt(bitrateSelect.value, 10) || 0;
-      var bps = kbps * 1000;
-      if (api.setVideoBitrate) api.setVideoBitrate(kbps);
+    function postBitrateToFrames(kbps) {
+      var bps = (kbps || 0) * 1000;
       var frames = document.querySelectorAll('.client-frame');
       frames.forEach(function (frame) {
         try {
@@ -2086,6 +2084,18 @@
           }
         } catch (_) {}
       });
+    }
+    bitrateSelect.addEventListener('change', function () {
+      var kbps = parseInt(bitrateSelect.value, 10) || 0;
+      if (api.setVideoBitrate) api.setVideoBitrate(kbps);
+      postBitrateToFrames(kbps);
+    });
+    // Handshake: the SPA injection requests the current bitrate once it's ready to
+    // listen (avoids the load-timing race). Respond with the stored value.
+    window.addEventListener('message', function (e) {
+      if (e.data && e.data.type === 'sharkord-request-bitrate' && api.getVideoBitrate) {
+        api.getVideoBitrate().then(function (kbps) { postBitrateToFrames(kbps || 0); });
+      }
     });
     bitrateBar.appendChild(bitrateLabel);
     bitrateBar.appendChild(bitrateSelect);
