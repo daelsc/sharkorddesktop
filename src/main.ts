@@ -337,7 +337,7 @@ function getAutoLoginInjectionCode(): string {
 
 function getWebrtcStatsInjectionCode(): string {
   const prefs = getDevicePreferences();
-  const FORCED_BPS = (prefs.videoBitrate || 5000) * 1000; // kbps -> bps, default 5 Mbps
+  const FORCED_BPS = (prefs.videoBitrate && prefs.videoBitrate > 0) ? prefs.videoBitrate * 1000 : 0; // kbps->bps; 0/Auto = no force (let Chromium's estimator decide)
   const FORCED_CODEC = JSON.stringify(prefs.videoCodec || 'H264');
   return [
     '(function(){if(window.__sharkordRtcStatsHooked)return;window.__sharkordRtcStatsHooked=true;',
@@ -346,25 +346,11 @@ function getWebrtcStatsInjectionCode(): string {
     'var FORCED_BPS=' + FORCED_BPS + ';',
     'var FORCED_CODEC=' + FORCED_CODEC + ';',
 
-    // Force preferred codec on transceivers — but NEVER on simulcast senders.
-    // A simulcast sender uses the app-chosen simulcast codec (VP8/AV1). Forcing
-    // H264/H265 here would break simulcast: Chromium can't do 3-layer H264/H265
-    // simulcast, so the upper layers would die. "AUTO" means let the app decide
-    // (no forcing at all) — preserves upstream simulcast.
-    //
-    // Robust simulcast detection: getParameters().encodings can COLLAPSE to the
-    // base layer when the upper layers are inactive (P2P, or an SFU not yet
-    // subscribed to mid/high), so encodings.length>1 alone misses real simulcast
-    // senders and would let us force-collapse them. The base encoding keeps its
-    // `rid` and scaleResolutionDownBy through the collapse, so detect on those.
-    'function isSimulcastSender(sender){',
-    '  try{var p=sender.getParameters();if(!p||!p.encodings)return false;',
-    '    if(p.encodings.length>1)return true;',
-    '    for(var i=0;i<p.encodings.length;i++){var e=p.encodings[i];',
-    '      if(e.rid)return true;',
-    '      if(e.scaleResolutionDownBy&&e.scaleResolutionDownBy>1)return true;}',
-    '    return false;}catch(e){return false;}',
-    '}',
+    // Force preferred codec on transceivers. Applies to simulcast senders too —
+    // we PROVED Chromium + NVENC do 3-layer H264 simulcast (1080p), so forcing H264
+    // via setCodecPreferences makes the desktop default take effect. setCodecPreferences
+    // does NOT use a transactionId (unlike setParameters), so it's safe to call here.
+    // "AUTO" means let the app decide (no forcing).
     'function forceCodec(pc){',
     '  if(!FORCED_CODEC||FORCED_CODEC==="AUTO")return;',
     '  try{var transceivers=pc.getTransceivers();',
@@ -385,21 +371,34 @@ function getWebrtcStatsInjectionCode(): string {
     '  });}catch(e){}',
     '}',
 
-    // Apply bitrate limits — but ONLY to single-stream senders. The old code forced
-    // min=max=FORCED_BPS on EVERY encoding, which collapsed simulcast's distinct
-    // low/mid/high quality layers into one flat bitrate (destroying simulcast).
-    // For a simulcast sender we leave the app's per-layer bitrates untouched and
-    // let the SFU manage per-layer congestion/subscription. For single-stream we
-    // keep the original behaviour: force a constant bitrate to bypass the bandwidth
-    // estimator (desired for LAN/local screen share) + maintain-resolution.
+    // Apply bitrate limits. Two paths:
+    //  - SIMULCAST (screen share): cap the HIGH layer's maxBitrate only, leaving the
+    //    low/mid layers alone so the SFU can still subscribe to lower quality. This
+    //    is applied LIVE via setParameters (no reload needed) — verified by the
+    //    --selftest-bitrate harness (10Mbps->high.maxBitrate=10000000, Auto->removed).
+    //    Auto (FORCED_BPS=0) = remove the cap so the bandwidth estimator decides.
+    //  - SINGLE-stream (webcam): force min=max=FORCED_BPS + maintain-resolution to
+    //    bypass the bandwidth estimator (desired for LAN). Auto = leave it alone.
     'function applyBitrateLimits(pc){',
-    '  if(!FORCED_BPS)return;',
     '  try{pc.getSenders().forEach(function(s){',
     '    if(!s.track||s.track.kind!=="video")return;',
     '    var p=s.getParameters();',
     '    if(!p.encodings||p.encodings.length===0)p.encodings=[{}];',
-    '    if(p.encodings.length>1)return; /* (redundant safety) handled by isSimulcastSender below */',
-    '    if(isSimulcastSender(s))return;', // simulcast (rid-aware) — preserve per-layer bitrates
+    // Detect simulcast from THIS p (do NOT call isSimulcastSender, which would call
+    // getParameters again and invalidate p's transactionId, causing setParameters to
+    // reject). rid or scaleResolutionDownBy>1 on any encoding => simulcast.
+    '    var sim=false;for(var si=0;si<p.encodings.length;si++){var se=p.encodings[si];if(se.rid||(se.scaleResolutionDownBy&&se.scaleResolutionDownBy>1)){sim=true;break;}}',
+    '    if(sim){',
+    '      var encs=p.encodings;var high=encs[encs.length-1];',
+    '      for(var i=0;i<encs.length;i++){if(encs[i].scaleResolutionDownBy===1)high=encs[i];}',
+    '      var lc=false;',
+    '      if(FORCED_BPS>0){if(high.maxBitrate!==FORCED_BPS){high.maxBitrate=FORCED_BPS;lc=true;}}',
+    '      else{if("maxBitrate" in high){delete high.maxBitrate;lc=true;}}',
+    '      if(lc)s.setParameters(p).catch(function(){});',
+    '      return;',
+    '    }',
+    '    if(!FORCED_BPS)return;',
+    '    if(p.encodings.length>1)return;',
     '    var enc=p.encodings[0];var changed=false;',
     '    if(enc.maxBitrate!==FORCED_BPS){enc.maxBitrate=FORCED_BPS;changed=true;}',
     '    if(enc.minBitrate!==FORCED_BPS){enc.minBitrate=FORCED_BPS;changed=true;}',
@@ -497,7 +496,7 @@ function getWebrtcStatsInjectionCode(): string {
   ].join('');
 }
 
-// Inject a hook that defaults the SPA's simulcast codec to H264 (NVENC).
+// Inject a hook that defaults the SPA's simulcast codec to H264 (NVENC) on load.
 // There is no codec selector UI anymore — H264 hardware simulcast is the desktop
 // default. The SPA's DevicesProvider rehydrates `screenCodec` from localStorage only
 // on mount, so on load we ensure `sharkord-devices-settings`.screenCodec is
@@ -506,6 +505,10 @@ function getWebrtcStatsInjectionCode(): string {
 // self-limiting: after it, screenCodec is already H264, so the guard doesn't fire
 // again (no loop). This runs only in the desktop app's SPA frame (injected by the
 // main process); web browser clients are unaffected and keep their own default.
+//
+// NOTE: the Bitrate selector is handled separately by the webrtc-stats injection
+// (applyBitrateLimits), which caps the high simulcast layer LIVE via setParameters
+// — no reload, works mid-share. So this codec injection does NOT touch bitrate.
 function getSimulcastCodecInjectionCode(): string {
   return [
     '(function(){if(window.__sharkordSimulcastCodecHooked)return;window.__sharkordSimulcastCodecHooked=true;',
@@ -513,11 +516,10 @@ function getSimulcastCodecInjectionCode(): string {
     'try{',
     '  var raw=localStorage.getItem(KEY);',
     '  var o=raw?JSON.parse(raw):{};',
-    '  var cur=o.screenCodec;',
-    '  if(cur!=="video/H264"){',
+    '  if(o.screenCodec!=="video/H264"){',
     '    o.screenCodec="video/H264";',
     '    localStorage.setItem(KEY,JSON.stringify(o));',
-    '    console.log("[Sharkov] defaulting simulcast screenCodec to video/H264 (was "+cur+")");',
+    '    console.log("[Sharkov] defaulting simulcast screenCodec to video/H264");',
     '    window.location.reload();',
     '  }',
     '}catch(e){}',
@@ -893,13 +895,41 @@ function runSelfTest(): void {
   });
 }
 
-// Inspect mode: electron . --inspect-streams --selftest-token=<path> [--selftest-host=...] [--selftest-channel=3]
-// Joins a voice channel as the token's user, lists remote producers, consumes each
-// video+screen producer, and prints the consumer rtpParameters (codec + scalability +
-// encodings) + server-reported qualityLayers. Reveals exactly what each other user is
-// offering. (A user cannot consume their own producer — getRemoteIds filters self — so
-// to inspect a given user you must run this as a DIFFERENT account joined to their
-// channel.)
+// Bitrate self-test: electron . --selftest-bitrate --selftest-token=<path> [--selftest-host=...] [--selftest-channel=4] [--selftest-codec=H264] [--selftest-out=...]
+// Produces an H264 simulcast stream, then verifies the live setParameters bitrate cap
+// works (apply 10Mbps -> high layer maxBitrate == 10000000; Auto -> reverts). No user
+// interaction; writes a JSON report and quits. Used to iterate on the bitrate selector
+// mechanism without a manual screen share.
+function runBitrateTest(): void {
+  const tokenPath = app.commandLine.getSwitchValue('selftest-token');
+  let token = '';
+  if (tokenPath) { try { token = readFileSync(tokenPath, 'utf8').trim(); } catch {} }
+  if (!token) { process.stdout.write('[bitrate-test] requires --selftest-token=<path>\n'); app.quit(); return; }
+  const outPath = app.commandLine.getSwitchValue('selftest-out') || path.join(app.getPath('userData'), 'bitrate-selftest-report.json');
+  const query: Record<string, string> = {
+    token,
+    host: app.commandLine.getSwitchValue('selftest-host') || 'sharkord.thesemite.com',
+    channel: app.commandLine.getSwitchValue('selftest-channel') || '4',
+    codec: app.commandLine.getSwitchValue('selftest-codec') || 'H264'
+  };
+  process.stdout.write(`[bitrate-test] writing report to ${outPath}\n`);
+  const win = new BrowserWindow({
+    width: 600, height: 560, show: true, title: 'Sharkov Bitrate Self-Test',
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  win.setMenuBarVisibility(false);
+  win.loadFile(path.join(__dirname, '..', 'static', 'selftest-bitrate.html'), { query });
+  win.webContents.on('console-message', (_e, ...args: unknown[]) => {
+    const msg = args.length >= 2 ? (args[1] as string) : ((args[0] as { message?: string })?.message ?? String(args[0]));
+    process.stdout.write(`[bitrate-test] ${msg}\n`);
+  });
+  ipcMain.once('selftest-report', (_e, report: unknown) => {
+    try { mkdirSync(path.dirname(outPath), { recursive: true }); writeFileSync(outPath, JSON.stringify(report, null, 2)); process.stdout.write(`[bitrate-test] report written to ${outPath}\n`); } catch (err) { process.stdout.write(`[bitrate-test] failed to write report: ${err}\n`); }
+    try { win.close(); } catch {}
+    app.quit();
+  });
+}
+
 function runInspectStreams(): void {
   const tokenPath = app.commandLine.getSwitchValue('selftest-token');
   let token = '';
@@ -925,6 +955,7 @@ function runInspectStreams(): void {
 
 app.whenReady().then(async () => {
   if (app.commandLine.hasSwitch('selftest') || app.commandLine.hasSwitch('selftest-live')) { runSelfTest(); return; }
+  if (app.commandLine.hasSwitch('selftest-bitrate')) { runBitrateTest(); return; }
   if (app.commandLine.hasSwitch('inspect-streams')) { runInspectStreams(); return; }
   const StoreImpl = (await import('electron-store')).default;
   store = new StoreImpl<{ serverUrl: string; savedServers: string }>({
