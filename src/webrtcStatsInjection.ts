@@ -20,6 +20,27 @@ export type WebrtcStatsInjectionOptions = {
 };
 
 /**
+ * Force b=AS bandwidth in SDP, skipping simulcast m-lines. A single b=AS cap on
+ * a simulcast m-line throttles the aggregate across all layers and can starve
+ * the high layer; simulcast sections carry `a=simulcast`. Extracted as a pure fn
+ * so it can be unit-tested (regex correctness, no double-cap, audio untouched,
+ * Auto no-op). The injection string calls this via the same logic.
+ */
+export function forceSdpBandwidth(sdp: string, forcedBps: number): string {
+  if (!sdp || !forcedBps) return sdp;
+  const bwKbps = Math.round(forcedBps / 1000);
+  const sections = sdp.split(/(?=m=)/);
+  for (let i = 0; i < sections.length; i++) {
+    if (sections[i].indexOf('m=video') === 0) {
+      if (/a=simulcast/i.test(sections[i])) continue;
+      sections[i] = sections[i].replace(/b=AS:\d+\r?\n/g, '');
+      sections[i] = sections[i].replace(/(m=video[^\n]+\n)/, '$1b=AS:' + bwKbps + '\r\n');
+    }
+  }
+  return sections.join('');
+}
+
+/**
  * Builds the webrtc-stats + control injection. Wraps RTCPeerConnection to:
  *  - force the preferred codec on video transceivers (setCodecPreferences)
  *  - apply bitrate limits (cap the simulcast HIGH layer live via setParameters;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import vm from 'node:vm';
-import { buildWebrtcStatsInjection, buildSimulcastCodecInjection } from '../src/webrtcStatsInjection';
+import { buildWebrtcStatsInjection, buildSimulcastCodecInjection, forceSdpBandwidth } from '../src/webrtcStatsInjection';
 
 /**
  * A mock RTCPeerConnection + sender that enforces the real WebRTC contract:
@@ -208,15 +208,44 @@ describe('buildWebrtcStatsInjection — single-stream bitrate force', () => {
 });
 
 describe('buildWebrtcStatsInjection — SDP bandwidth forcing', () => {
-  it('injects b=AS on a non-simulcast video m-line', () => {
-    // forceSdpBandwidth is called via setLocalDescription wrap. Build a PC and call it.
-    const pc = makePc([]);
-    const w = freshWindow(pc);
-    runInjection(buildWebrtcStatsInjection({ forcedBps: 6000000, forcedCodec: 'H264' }), w);
-    // The wrapped RTCPeerConnection constructor returns pc (our mock), but the
-    // setLocalDescription wrap is applied INSIDE the injection's constructor, which
-    // we don't use here. Test forceSdpBandwidth by extracting it: re-eval and grab.
-    // Simpler: assert the built string contains the b=AS injection logic.
+  const singleSdp = 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 VP8/90000\r\n';
+  const simulcastSdp = 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=simulcast:prepare rid=low;high\r\n';
+  const audioSdp = 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n';
+  const mixedSdp = 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n';
+
+  it('injects b=AS:<kbps> after the m=video line on a single-stream SDP', () => {
+    const out = forceSdpBandwidth(singleSdp, 6000000);
+    expect(out).toContain('b=AS:6000');
+    expect(out.indexOf('b=AS:6000')).toBeGreaterThan(out.indexOf('m=video'));
+  });
+  it('skips simulcast video sections (a=simulcast present) — returned unchanged', () => {
+    expect(forceSdpBandwidth(simulcastSdp, 6000000)).toBe(simulcastSdp);
+  });
+  it('replaces an existing b=AS line instead of duplicating', () => {
+    const withBw = 'm=video 9 UDP/TLS/RTP/SAVPF 96\r\nb=AS:1000\r\n';
+    const out = forceSdpBandwidth(withBw, 6000000);
+    expect((out.match(/b=AS:/g) || []).length).toBe(1);
+    expect(out).toContain('b=AS:6000');
+    expect(out).not.toContain('b=AS:1000');
+  });
+  it('leaves audio sections untouched', () => {
+    const out = forceSdpBandwidth(audioSdp, 6000000) as string;
+    expect(out).toBe(audioSdp);
+  });
+  it('leaves the audio section untouched in a mixed SDP and caps the video section', () => {
+    const out = forceSdpBandwidth(mixedSdp, 4000000);
+    expect(out).toContain('b=AS:4000');
+    // audio section (before m=video) is unchanged up to the m=video line
+    expect(out.startsWith('v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n')).toBe(true);
+  });
+  it('returns sdp unchanged when forcedBps===0 (Auto)', () => {
+    expect(forceSdpBandwidth(singleSdp, 0)).toBe(singleSdp);
+  });
+  it('returns input unchanged when sdp is falsy', () => {
+    expect(forceSdpBandwidth('', 6000000)).toBe('');
+    expect(forceSdpBandwidth(null as unknown as string, 6000000)).toBe(null as unknown as string);
+  });
+  it('the built injection string contains the same b=AS logic', () => {
     const code = buildWebrtcStatsInjection({ forcedBps: 6000000, forcedCodec: 'H264' });
     expect(code).toContain('b=AS:"+bwKbps+"');
     expect(code).toContain('if(/a=simulcast/i.test(sections[i]))continue;');

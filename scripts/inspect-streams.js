@@ -2,8 +2,7 @@
 // Joins a channel, lists remote producers, consumes each video+screen producer,
 // and dumps the consumer rtpParameters (codec, scalability, encodings) + qualityLayers.
 const { ipcRenderer } = require('electron');
-const { createTRPCProxyClient, wsLink, createWSClient } = require('@trpc/client');
-const mediasoupClient = require('mediasoup-client');
+const { createServerSession, createRecvTransport } = require('../static/mediasoup-session.js');
 
 const CFG = window.__CFG || {
   host: process.argv[2] || 'sharkord.thesemite.com',
@@ -19,25 +18,17 @@ let device;
 function log(m) { console.log('[inspect] ' + m); logToDom('[inspect] ' + m); }
 
 (async () => {
-  // tRPC over WS
-  closeClient = createWSClient({ url: wsUrl, connectionParams: async () => ({ token: CFG.token }) });
-  client = createTRPCProxyClient({ links: [wsLink({ client: closeClient })] });
+  const session = await createServerSession({ host: CFG.host, token: CFG.token, channelId: CFG.channel });
   log('connecting tRPC ws -> ' + wsUrl);
-  const hs = await client.others.handshake.query();
-  await client.others.joinServer.query({ handshakeHash: hs.handshakeHash });
+  closeClient = session.wsClient;
+  client = session.trpc;
+  device = session.device;
   log('joined server, joining voice channel ' + CFG.channel);
-  const { routerRtpCapabilities } = await client.voice.join.mutate({ channelId: CFG.channel, state: {} });
-  log('got routerRtpCapabilities, codecs: ' + routerRtpCapabilities.codecs.map(c => c.mimeType).join(', '));
-
-  device = new mediasoupClient.Device();
-  await device.load({ routerRtpCapabilities });
+  log('got routerRtpCapabilities, codecs: ' + session.routerRtpCapabilities.codecs.map(c => c.mimeType).join(', '));
 
   // Create a consumer transport (needed to consume)
   const consumerTransportParams = await client.voice.createConsumerTransport.mutate({});
-  const consumerTransport = device.createRecvTransport(consumerTransportParams);
-  consumerTransport.on('connect', ({ dtlsParameters }, cb) => {
-    client.voice.connectConsumerTransport.mutate({ dtlsParameters }).then(cb).catch(cb);
-  });
+  const consumerTransport = await createRecvTransport(session, consumerTransportParams);
 
   // List remote producers
   const remotes = await client.voice.getProducers.query();

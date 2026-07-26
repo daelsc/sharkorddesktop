@@ -7,7 +7,7 @@ const { ipcRenderer } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { createTRPCProxyClient, wsLink, createWSClient } = require('@trpc/client');
+const { createServerSession, createSendTransport, SIMULCAST_ENCODINGS, QUALITY_LAYERS } = require('./mediasoup-session.js');
 const mediasoupClient = require('mediasoup-client');
 
 const qs = new URLSearchParams(location.search);
@@ -114,18 +114,13 @@ function readHighLayerMaxBitrate(pc) {
     window.RTCPeerConnection.prototype = OrigPC.prototype;
 
     // 3. connect + produce an H264 simulcast stream
-    const closeClient = createWSClient({ url: 'wss://' + CFG.host, connectionParams: async () => ({ token: CFG.token }) });
-    const trpc = createTRPCProxyClient({ links: [wsLink({ client: closeClient })] });
+    const session = await createServerSession({ host: CFG.host, token: CFG.token, channelId: CFG.channel });
     out('connecting tRPC ws -> wss://' + CFG.host);
-    const hs = await trpc.others.handshake.query();
-    await trpc.others.joinServer.query({ handshakeHash: hs.handshakeHash });
+    const closeClient = session.wsClient;
+    const trpc = session.trpc;
     out('joined -> voice channel ' + CFG.channel);
-    const { routerRtpCapabilities } = await trpc.voice.join.mutate({ channelId: CFG.channel, state: {} });
-    const device = new mediasoupClient.Device();
-    await device.load({ routerRtpCapabilities });
     const transportParams = await trpc.voice.createProducerTransport.mutate({});
-    const transport = device.createSendTransport(transportParams);
-    transport.on('connect', ({ dtlsParameters }, cb, eb) => trpc.voice.connectProducerTransport.mutate({ dtlsParameters }).then(cb).catch(eb));
+    const transport = await createSendTransport(session, transportParams);
     transport.on('produce', async ({ rtpParameters, appData }, cb, eb) => {
       try {
         const qualityLayers = [{ spatialLayer: 0, label: 'Low' }, { spatialLayer: 1, label: 'Medium' }, { spatialLayer: 2, label: 'High' }];
@@ -136,6 +131,7 @@ function readHighLayerMaxBitrate(pc) {
     const stream = canvas.captureStream(30);
     const track = stream.getVideoTracks()[0];
     const wantMime = 'video/' + CFG.codec;
+    const device = session.device;
     const preferredCodec = (device.rtpCapabilities.codecs || []).find(c => c.mimeType.toLowerCase() === wantMime.toLowerCase());
     out('preferred codec: ' + (preferredCodec ? preferredCodec.mimeType : 'none'));
     const producer = await transport.produce({
