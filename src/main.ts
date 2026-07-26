@@ -807,7 +807,8 @@ app.whenReady().then(async () => {
 
   setupMediaPermissions();
   Menu.setApplicationMenu(buildMenu());
-  createMainWindow();  // Auto-update (only works with NSIS installer, not portable exe)
+  createMainWindow();
+  // Auto-update (only works with NSIS installer, not portable exe)
   const autoUpdater = new NsisUpdater({
     provider: 'github',
     owner: 'daelsc',
@@ -904,9 +905,17 @@ ipcMain.handle('set-video-codec', (_event, codec: string) => {
 });
 
 const rtcLogPath = path.join(app.getPath('userData'), 'rtc-stats.log');
+const RTC_LOG_MAX_BYTES = 50 * 1024 * 1024; // cap at 50 MB (was unbounded -> 211MB+)
 let rtcLogStream: import('fs').WriteStream | null = null;
+let rtcLogBytes = 0;
 function getRtcLogStream() {
   if (!rtcLogStream) {
+    // Truncate an oversized log on startup rather than letting it grow forever.
+    try {
+      const st = require('fs').statSync(rtcLogPath);
+      if (st.size > RTC_LOG_MAX_BYTES) require('fs').truncateSync(rtcLogPath, 0);
+      rtcLogBytes = st.size > RTC_LOG_MAX_BYTES ? 0 : st.size;
+    } catch { rtcLogBytes = 0; }
     rtcLogStream = require('fs').createWriteStream(rtcLogPath, { flags: 'a' });
     rtcLogStream!.write(`\n--- Session started ${new Date().toISOString()} ---\n`);
   }
@@ -914,7 +923,21 @@ function getRtcLogStream() {
 }
 ipcMain.handle('log-rtc-stats', (_event, report: unknown) => {
   const ts = new Date().toISOString();
-  getRtcLogStream().write(ts + ' ' + JSON.stringify(report) + '\n');
+  const line = ts + ' ' + JSON.stringify(report) + '\n';
+  const stream = getRtcLogStream();
+  stream.write(line);
+  rtcLogBytes += Buffer.byteLength(line);
+  // Rotate when the cap is exceeded: close, truncate, reopen. Avoids unbounded
+  // disk growth (a compromised renderer could otherwise flood this forever).
+  if (rtcLogBytes > RTC_LOG_MAX_BYTES) {
+    try {
+      stream.end();
+    } catch { /* ignore */ }
+    rtcLogStream = null;
+    try { require('fs').truncateSync(rtcLogPath, 0); } catch { /* ignore */ }
+    rtcLogBytes = 0;
+    getRtcLogStream().write(`\n--- Rotated ${new Date().toISOString()} (cap ${RTC_LOG_MAX_BYTES} bytes) ---\n`);
+  }
 });
 
 ipcMain.handle('confirm-clear-servers', async () => {
@@ -1108,10 +1131,12 @@ ipcMain.handle('get-device-preferences', () => getDevicePreferences());
 
 ipcMain.handle('set-device-preferences', (_event, prefs: DevicePreferences) => {
   setDevicePreferences(prefs ?? {});
-  injectDevicePrefsIntoFrames();});
+  injectDevicePrefsIntoFrames();
+});
 
 ipcMain.handle('request-apply-device-preferences', () => {
-  injectDevicePrefsIntoFrames();});
+  injectDevicePrefsIntoFrames();
+});
 
 ipcMain.handle('ptt-state', (_event, pressed: boolean) => {
   setPttPressed(!!pressed);
