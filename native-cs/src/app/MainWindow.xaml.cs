@@ -24,6 +24,7 @@ public partial class MainWindow : Window, IMessageHandlerActions
     private readonly MessageRouter _router;
     private readonly Dictionary<string, WebView2> _webviews = new();
     private string? _activeServerId;
+    private CoreWebView2Environment? _webview2Env; // cached so EnsureCoreWebView2Async picks up the Tarkov auto-select flag
 
     public MainWindow()
     {
@@ -66,7 +67,7 @@ public partial class MainWindow : Window, IMessageHandlerActions
         RenderSidebar();
     }
 
-    private static async Task EnsureWebView2EnvironmentAsync()
+    private async Task EnsureWebView2EnvironmentAsync()
     {
         try
         {
@@ -75,6 +76,11 @@ public partial class MainWindow : Window, IMessageHandlerActions
             // auto-select of EscapeFromTarkov / EscapeFromTarkovArena). We set this in-code
             // via CoreWebView2EnvironmentOptions (NOT an env var) so a normal double-click
             // works without the user setting anything. See TarkovDetector for the limits.
+            //
+            // The env MUST be cached and passed to EnsureCoreWebView2Async below — creating
+            // it here and then calling EnsureCoreWebView2Async() with no args builds a SECOND
+            // default env (no flags), which was why the auto-select flag never reached the
+            // WebView2 process in the first attempt.
             var tarkov = TarkovDetector.FindTarkovWindowTitle();
             if (!string.IsNullOrEmpty(tarkov))
             {
@@ -82,11 +88,11 @@ public partial class MainWindow : Window, IMessageHandlerActions
                 {
                     AdditionalBrowserArguments = $"--auto-select-desktop-capture-source={tarkov}"
                 };
-                await CoreWebView2Environment.CreateAsync(options: opts);
+                _webview2Env = await CoreWebView2Environment.CreateAsync(options: opts);
             }
             else
             {
-                await CoreWebView2Environment.CreateAsync();
+                _webview2Env = await CoreWebView2Environment.CreateAsync();
             }
         }
         catch { /* uses the installed evergreen runtime by default */ }
@@ -168,9 +174,12 @@ public partial class MainWindow : Window, IMessageHandlerActions
     /// first ShowServer call at startup would leave a blank page: EnsureCoreWebView2Async
     /// alone doesn't load any URL, leaving users staring at an empty frame until they
     /// re-click the server button.</summary>
-    private static async Task InitializeWebViewAndNavigateAsync(WebView2 wv, string url)
+    private async Task InitializeWebViewAndNavigateAsync(WebView2 wv, string url)
     {
-        await wv.EnsureCoreWebView2Async();
+        // Pass the cached env (with the Tarkov auto-select flag) so the WebView2 process
+        // inherits it. Omitting the arg builds a fresh default env and discards the flag.
+        if (_webview2Env is not null) await wv.EnsureCoreWebView2Async(_webview2Env);
+        else await wv.EnsureCoreWebView2Async();
         wv.Source = new Uri(url);
     }
 
