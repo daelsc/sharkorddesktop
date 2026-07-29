@@ -55,6 +55,11 @@ public sealed class FrameInjector
         PostBitrate(webview, kbps);
     }
 
+    /// <summary>JS to update the PTT binding live in a webview (used by the picker dialog).
+    /// Idempotent — safe to call repeatedly; does not re-wrap getUserMedia.</summary>
+    public static string BuildDevicePrefsJsForReinject(DevicePreferences prefs)
+        => InjectionBuilders.BuildPttBindingUpdateJs(prefs.PttBinding);
+
     private static async Task TryExec(CoreWebView2 webview, string code)
     {
         try { await webview.ExecuteScriptAsync(code); }

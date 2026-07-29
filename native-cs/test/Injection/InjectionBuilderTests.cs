@@ -426,4 +426,96 @@ public class InjectionBuilderTests
         Assert.Equal(1, e.Evaluate("a.closeCalls").AsNumber()); // 'a' was closed
         Assert.Equal(0, e.Evaluate("b.closeCalls").AsNumber()); // 'b' (readyState 3) was skipped
     }
+
+    // ---- PTT binding live update (the picker dialog's re-inject) ----
+
+    /// <summary>Drives BuildDevicePrefsInjection + BuildPttBindingUpdateJs in Jint against a
+    /// mock getUserMedia that returns a stream with a track whose `enabled` we can observe.</summary>
+    private static Engine DrivePttEngine(string? initialBinding)
+    {
+        var e = new Engine(opts => opts.LimitRecursion(10_000));
+        e.Execute(@"
+          var __posted = [];
+          var __track = { enabled: true, kind: 'audio' };
+          var __stream = { getAudioTracks: function(){ return [__track]; }, getVideoTracks: function(){ return []; } };
+          var __keyHandlers = [];
+          var document = {
+            addEventListener: function(t, fn, cap){ if(t==='keydown'||t==='keyup'||t==='mousedown'||t==='mouseup') __keyHandlers.push({type:t, fn:fn}); },
+            removeEventListener: function(){}
+          };
+          var window = {
+            addEventListener: function(){},
+            parent: null,
+            location: { reload: function(){} },
+            AudioContext: function(){},
+            navigator: { mediaDevices: { getUserMedia: function(c){ return { then: function(cb){ if(typeof cb==='function') cb(__stream); return this; }, catch: function(){ return this; } }; }, enumerateDevices: function(){ return { then: function(cb){ if(typeof cb==='function') cb([]); return this; } }; } } },
+            chrome: { webview: { postMessage: function(m){ __posted.push(m); } } }
+          };
+          window.parent = window;
+          window.document = document;
+          function MediaStream(){} MediaStream.prototype.addTrack = function(){};
+          window.__keyHandlers = __keyHandlers;
+          // expose as bare globals (the injection uses `navigator.mediaDevices`, not `window.navigator`)
+          navigator = window.navigator;
+        ");
+        e.Execute(InjectionBuilders.BuildDevicePrefsInjection("{}", initialBinding));
+        // Call the wrapped getUserMedia so addTracksToPtt runs and populates
+        // __sharkordPttAudioTracks (the injection only wraps it; it never calls it).
+        e.Execute("navigator.mediaDevices.getUserMedia({audio:true});");
+        // In a real browser window===global, so window.__sharkordPost IS the bare global the
+        // listeners call. Jint keeps them separate, so mirror it for the keydown test.
+        e.Execute("if(window.__sharkordPost) __sharkordPost = window.__sharkordPost;");
+        return e;
+    }
+
+    [Fact]
+    public void PttUpdate_NoSlashSlashLineComments()
+        => Assert.DoesNotContain("//", InjectionBuilders.BuildPttBindingUpdateJs("KeyV"));
+
+    [Fact]
+    public void PttDevicePrefs_MutesTrackWhenBindingSet()
+    {
+        var e = DrivePttEngine("KeyV");
+        // addTracksToPtt runs in getUserMedia.then; with a binding set the track starts muted.
+        Assert.False(e.Evaluate("__track.enabled").AsBoolean());
+    }
+
+    [Fact]
+    public void PttDevicePrefs_LeavesTrackEnabledWhenNoBinding()
+    {
+        var e = DrivePttEngine(null);
+        Assert.True(e.Evaluate("__track.enabled").AsBoolean());
+    }
+
+    [Fact]
+    public void PttUpdate_ClearingBindingUnmutesExistingTracks()
+    {
+        var e = DrivePttEngine("KeyV");
+        Assert.False(e.Evaluate("__track.enabled").AsBoolean()); // muted by PTT
+        e.Execute(InjectionBuilders.BuildPttBindingUpdateJs(null));
+        Assert.True(e.Evaluate("__track.enabled").AsBoolean()); // un-muted (open mic)
+        Assert.Equal("null", e.Evaluate("JSON.stringify(window.__sharkordPttBinding)").AsString());
+    }
+
+    [Fact]
+    public void PttUpdate_SettingNewBindingMutesAndUpdatesGlobal()
+    {
+        var e = DrivePttEngine(null);
+        Assert.True(e.Evaluate("__track.enabled").AsBoolean());
+        e.Execute(InjectionBuilders.BuildPttBindingUpdateJs("BracketLeft"));
+        Assert.False(e.Evaluate("__track.enabled").AsBoolean());
+        Assert.Equal("BracketLeft", e.Evaluate("window.__sharkordPttBinding").AsString());
+    }
+
+    [Fact]
+    public void PttListeners_ReadLiveBindingAndPostOnKey()
+    {
+        var e = DrivePttEngine(null);
+        e.Execute("window.__sharkordPttBinding = 'BracketLeft';"); // live update (no re-install)
+        // fire a keydown for BracketLeft -> should post sharkord-ptt pressed:true
+        e.Execute("window.__keyHandlers.filter(function(h){return h.type==='keydown';}).forEach(function(h){ h.fn({code:'BracketLeft', preventDefault:function(){}, stopPropagation:function(){}}); });");
+        var posted = e.Evaluate("JSON.stringify(__posted)").AsString();
+        Assert.Contains("sharkord-ptt", posted);
+        Assert.Contains("true", posted);
+    }
 }

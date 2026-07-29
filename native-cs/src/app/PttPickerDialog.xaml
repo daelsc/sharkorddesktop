@@ -1,0 +1,53 @@
+<Window x:Class="Sharkov.App.PttPickerDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Push to Talk" Width="340" Height="200"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        Background="#18181b" ShowInTaskbar="False">
+    <Window.Resources>
+        <Style x:Key="PttBtn" TargetType="Button">
+            <Setter Property="Padding" Value="14,6"/>
+            <Setter Property="Margin" Value="6,0,0,0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="#e4e4e7"/>
+            <Setter Property="Background" Value="#27272a"/>
+            <Setter Property="BorderBrush" Value="#3f3f46"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#3f3f46"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Push to talk" Foreground="#e4e4e7" FontSize="14" FontWeight="SemiBold"/>
+        <TextBlock Grid.Row="1" Text="Hold the key to transmit; release to mute."
+                   Foreground="#71717a" FontSize="11" Margin="0,4,0,12"/>
+
+        <Border Grid.Row="2" Background="#0d0d0d" BorderBrush="#3f3f46" BorderThickness="1"
+                CornerRadius="6" Padding="12">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock x:Name="BindingDisplay" Text="Not set" Foreground="#a1a1aa"
+                           FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center"
+                           Margin="0,0,0,8"/>
+                <TextBlock x:Name="Hint" Text="Click “Set key” then press a key or mouse button."
+                           Foreground="#52525b" FontSize="10" HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="SetBtn" Style="{StaticResource PttBtn}" Content="Set key" Click="SetBtn_Click"/>
+            <Button x:Name="ResetBtn" Style="{StaticResource PttBtn}" Content="Reset" Click="ResetBtn_Click"/>
+            <Button x:Name="CloseBtn" Style="{StaticResource PttBtn}" Content="Done" Click="CloseBtn_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

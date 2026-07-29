@@ -21,7 +21,7 @@ public static class InjectionBuilders
     // scope (outside any IIFE) so it persists across the injection strings.
     private const string BridgePreamble =
         "if(!window.__sharkordPost){window.__sharkordPost=function(msg,origin){" +
-        "try{if(window.chrome&&chrome.webview&&chrome.webview.postMessage){chrome.webview.postMessage(msg);return true;}}catch(e){}" +
+        "try{if(window.chrome&&window.chrome.webview&&window.chrome.webview.postMessage){window.chrome.webview.postMessage(msg);return true;}}catch(e){}" +
         "try{if(window.parent&&window.parent!==window){window.parent.postMessage(msg,origin||\"*\");return true;}}catch(e){}" +
         "return false;};}";
 
@@ -198,9 +198,12 @@ public static class InjectionBuilders
         BridgePreamble,
         "(function(){var p=", prefsJson, ";var md=navigator.mediaDevices;if(!md)return;",
         "window.__sharkordPttAudioTracks=window.__sharkordPttAudioTracks||[];",
-        "var pttBinding=", pttBinding is null ? "null" : JsonQuote(pttBinding), ";",
+        // The PTT binding is stored on window so the picker can update it live (see
+        // BuildPttBindingUpdateJs) without re-running this whole injection (which would
+        // double-wrap getUserMedia — this IIFE has no idempotency guard by design).
+        "window.__sharkordPttBinding=", pttBinding is null ? "null" : JsonQuote(pttBinding), ";",
         "var origGUM=md.getUserMedia&&md.getUserMedia.bind(md);var origEnum=md.enumerateDevices&&md.enumerateDevices.bind(md);",
-        "function addTracksToPtt(stream){if(!stream.getAudioTracks)return;stream.getAudioTracks().forEach(function(tr){if(window.__sharkordPttAudioTracks.indexOf(tr)===-1)window.__sharkordPttAudioTracks.push(tr);if(pttBinding)tr.enabled=false;});}",
+        "function addTracksToPtt(stream){if(!stream.getAudioTracks)return;stream.getAudioTracks().forEach(function(tr){if(window.__sharkordPttAudioTracks.indexOf(tr)===-1)window.__sharkordPttAudioTracks.push(tr);if(window.__sharkordPttBinding)tr.enabled=false;});}",
         "if(origGUM){md.getUserMedia=function(c){var t=typeof c===\"object\"&&c!==null?JSON.parse(JSON.stringify(c)):{};",
         "if(p.audioInput===\"none\"&&t.audio)t.audio=false;else if(p.audioInput&&p.audioInput!==\"none\"&&t.audio){t.audio=t.audio===true?{deviceId:{exact:p.audioInput}}:Object.assign({},t.audio,{deviceId:{exact:p.audioInput}});}",
         "if(p.videoInput===\"none\"&&t.video)t.video=false;else if(p.videoInput&&p.videoInput!==\"none\"&&t.video){t.video=t.video===true?{deviceId:{exact:p.videoInput}}:Object.assign({},t.video,{deviceId:{exact:p.videoInput}});}",
@@ -217,12 +220,13 @@ public static class InjectionBuilders
         "if(p.audioInput&&p.audioInput!==\"none\")out.push({deviceId:p.audioInput,kind:\"audioinput\",label:p.audioInputLabel||\"Microphone\",groupId:\"\"});",
         "if(p.videoInput&&p.videoInput!==\"none\")out.push({deviceId:p.videoInput,kind:\"videoinput\",label:p.videoInputLabel||\"Camera\",groupId:\"\"});",
         "return out.length>0?Promise.resolve(out):origEnum();};}",
-        "if(pttBinding&&String(pttBinding).indexOf(\"Mouse\")===0){var btn=parseInt(String(pttBinding).slice(5),10)||0;",
-        "document.addEventListener(\"mousedown\",function(e){if(e.button===btn){e.preventDefault();try{__sharkordPost({type:\"sharkord-ptt\",pressed:true},\"*\");}catch(e){}}},true);",
-        "document.addEventListener(\"mouseup\",function(e){if(e.button===btn){e.preventDefault();try{__sharkordPost({type:\"sharkord-ptt\",pressed:false},\"*\");}catch(e){}}},true);}",
-        "if(pttBinding&&String(pttBinding).indexOf(\"Mouse\")!==0){var keyCode=String(pttBinding);",
-        "document.addEventListener(\"keydown\",function(e){if(e.code===keyCode){e.preventDefault();e.stopPropagation();try{__sharkordPost({type:\"sharkord-ptt\",pressed:true},\"*\");}catch(e){}}},true);",
-        "document.addEventListener(\"keyup\",function(e){if(e.code===keyCode){e.preventDefault();e.stopPropagation();try{__sharkordPost({type:\"sharkord-ptt\",pressed:false},\"*\");}catch(e){}}},true);}",
+        // PTT key listeners. They read window.__sharkordPttBinding at event time (not a
+        // closure) so BuildPttBindingUpdateJs can change the key without re-installing.
+        // Install both mouse and keyboard listeners once; each checks the live binding.
+        "document.addEventListener(\"mousedown\",function(e){var b=window.__sharkordPttBinding;if(b&&String(b).indexOf(\"Mouse\")===0){var btn=parseInt(String(b).slice(5),10)||0;if(e.button===btn){e.preventDefault();try{__sharkordPost({type:\"sharkord-ptt\",pressed:true},\"*\");}catch(x){}}}},true);",
+        "document.addEventListener(\"mouseup\",function(e){var b=window.__sharkordPttBinding;if(b&&String(b).indexOf(\"Mouse\")===0){var btn=parseInt(String(b).slice(5),10)||0;if(e.button===btn){e.preventDefault();try{__sharkordPost({type:\"sharkord-ptt\",pressed:false},\"*\");}catch(x){}}}},true);",
+        "document.addEventListener(\"keydown\",function(e){var b=window.__sharkordPttBinding;if(b&&String(b).indexOf(\"Mouse\")!==0){if(e.code===String(b)){e.preventDefault();e.stopPropagation();try{__sharkordPost({type:\"sharkord-ptt\",pressed:true},\"*\");}catch(x){}}}},true);",
+        "document.addEventListener(\"keyup\",function(e){var b=window.__sharkordPttBinding;if(b&&String(b).indexOf(\"Mouse\")!==0){if(e.code===String(b)){e.preventDefault();e.stopPropagation();try{__sharkordPost({type:\"sharkord-ptt\",pressed:false},\"*\");}catch(x){}}}},true);",
         "if(!window.__sharkordGDMWrapped){window.__sharkordGDMWrapped=true;",
         "var origGDM=md.getDisplayMedia&&md.getDisplayMedia.bind(md);",
         "if(origGDM){md.getDisplayMedia=function(c){",
@@ -387,6 +391,19 @@ public static class InjectionBuilders
     public static string BuildCloseWebSocketsJs() =>
         "(function(){var l=window.__sharkordWebSockets||[];var c=0;" +
         "l.forEach(function(s){try{if(s.readyState===1){s.close();c++;}}catch(e){}});return c;})();";
+
+    /// <summary>Idempotent update of the PTT binding at runtime (used by the picker dialog).
+    /// Sets window.__sharkordPttBinding (which the device-prefs key listeners read at event
+    /// time) and re-applies mute state to existing tracks: a binding set mutes them (PTT
+    /// = hold-to-talk), a cleared binding un-mutes them (open mic). Does NOT re-install
+    /// listeners or re-wrap getUserMedia, so it's safe to call repeatedly.</summary>
+    public static string BuildPttBindingUpdateJs(string? binding)
+    {
+        var b = binding is null ? "null" : JsonQuote(binding);
+        return "(function(){window.__sharkordPttBinding=" + b + ";" +
+               "var tracks=window.__sharkordPttAudioTracks||[];" +
+               "tracks.forEach(function(t){try{t.enabled=!window.__sharkordPttBinding;}catch(e){}});})();";
+    }
 
     // ---- pure C# port of forceSdpBandwidth (webrtcStatsInjection.ts:29) for unit testing ----
 

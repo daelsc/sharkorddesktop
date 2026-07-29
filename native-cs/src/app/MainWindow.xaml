@@ -71,6 +71,10 @@
                 <ComboBox x:Name="BitrateCombo" Margin="6,0,0,0" FontSize="11" MinWidth="70"
                           Background="#27272a" Foreground="#e4e4e7" BorderBrush="#3f3f46"
                           SelectionChanged="BitrateCombo_SelectionChanged"/>
+                <Button x:Name="PttBtn" Content="PTT" Margin="6,0,0,0" FontSize="11"
+                        Padding="8,2" Background="#27272a" Foreground="#e4e4e7"
+                        BorderBrush="#3f3f46" BorderThickness="1" Cursor="Hand"
+                        ToolTip="Set the push-to-talk key" Click="PttBtn_Click"/>
             </StackPanel>
         </Border>
     </Grid>

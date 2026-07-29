@@ -190,7 +190,20 @@ public partial class MainWindow : Window, IMessageHandlerActions
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
-        var json = e.TryGetWebMessageAsString();
+        // The injections post OBJECTS ({type:"sharkord-*",...}) via chrome.webview.postMessage.
+        // TryGetWebMessageAsString() THROWS ArgumentException for object messages (it only handles
+        // plain strings), so every sharkord-* message used to throw here and never route — which
+        // is why PTT was stuck hot (sharkord-ptt never reached SetPtt) and rtc-stats never logged.
+        // WebMessageAsJson handles both: for an object it returns the object's JSON (e.g.
+        // '{"type":"sharkord-ptt","pressed":true}'); for a plain string it returns '"str"'.
+        // We prefer JSON; fall back to the string API only if the page posted a bare string.
+        string json;
+        try { json = e.WebMessageAsJson; }
+        catch
+        {
+            try { json = e.TryGetWebMessageAsString(); }
+            catch { return; }
+        }
         // The message's origin: take it from the webview's current Source (the sender),
         // normalized to scheme+host+port. Mirrors e.origin in the postMessage protocol.
         var origin = "";
@@ -228,6 +241,16 @@ public partial class MainWindow : Window, IMessageHandlerActions
         // post the live update to the active webview
         if (_activeServerId is not null && _webviews.TryGetValue(_activeServerId, out var wv) && wv.CoreWebView2 is not null)
             _injector.PostBitrate(wv.CoreWebView2, kbps);
+    }
+
+    private void PttBtn_Click(object sender, RoutedEventArgs e)
+    {
+        var current = _store.GetDevicePreferences().PttBinding;
+        var dlg = new PttPickerDialog(_store, _injector,
+            () => _activeServerId is not null && _webviews.TryGetValue(_activeServerId, out var wv) ? wv : null,
+            current)
+        { Owner = this };
+        dlg.ShowDialog();
     }
 
     // ---- add server ----

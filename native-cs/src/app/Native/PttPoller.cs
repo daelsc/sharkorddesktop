@@ -22,6 +22,101 @@ public sealed class PttPoller : IDisposable
         _onState = onState;
     }
 
+    // e.code → VK for the named (non-Key/non-Digit/non-Numpad/non-F/non-Mouse) keys.
+    // Shared by PttBindingToVk (forward) and VkToPttBinding (reverse, used by the picker).
+    private static readonly Dictionary<string, int> CodeToVk = new(StringComparer.Ordinal)
+    {
+        { "BracketLeft",  0xdb }, // VK_OEM_4 [
+        { "BracketRight", 0xdd }, // VK_OEM_6 ]
+        { "Backslash",    0xdc }, // VK_OEM_5 \
+        { "Semicolon",    0xba }, // VK_OEM_1 ;
+        { "Quote",        0xde }, // VK_OEM_7 '
+        { "Comma",        0xbc }, // VK_OEM_COMMA ,
+        { "Period",       0xbe }, // VK_OEM_PERIOD .
+        { "Slash",        0xbf }, // VK_OEM_2 /
+        { "Backquote",    0xc0 }, // VK_OEM_3 `
+        { "Minus",        0xbd }, // VK_OEM_MINUS -
+        { "Equal",        0xbb }, // VK_OEM_PLUS =
+        { "Space",        0x20 },
+        { "Enter",        0x0d },
+        { "Tab",          0x09 },
+        { "Escape",       0x1b },
+        { "Backspace",    0x08 },
+        { "ShiftLeft",    0xa0 },
+        { "ShiftRight",   0xa1 },
+        { "ControlLeft",  0xa2 },
+        { "ControlRight", 0xa3 },
+        { "AltLeft",      0xa4 },
+        { "AltRight",     0xa5 },
+        { "CapsLock",     0x14 },
+        { "ArrowLeft",    0x25 },
+        { "ArrowUp",      0x26 },
+        { "ArrowRight",   0x27 },
+        { "ArrowDown",    0x28 },
+        { "Home",         0x24 },
+        { "End",          0x23 },
+        { "PageUp",       0x21 },
+        { "PageDown",     0x22 },
+        { "Insert",       0x2d },
+        { "Delete",       0x2e }
+    };
+
+    // Reverse of CodeToVk, built once. VK → e.code for the picker (which captures a VK via
+    // KeyInterop.VirtualKeyFromKey and needs the e.code string the injection compares against).
+    private static readonly Dictionary<int, string> VkToCode = BuildVkToCode();
+    private static Dictionary<int, string> BuildVkToCode()
+    {
+        var d = new Dictionary<int, string>();
+        foreach (var kv in CodeToVk) d[kv.Value] = kv.Key;
+        return d;
+    }
+
+    /// <summary>Map a virtual key code to the PTT binding string the injection expects
+    /// (a KeyboardEvent.code, e.g. "KeyV", "BracketLeft", "F5", "Numpad3"). Returns null
+    /// for keys we don't support as PTT bindings. Used by the WPF picker dialog.</summary>
+    public static string? VkToPttBinding(int vk)
+    {
+        if (VkToCode.TryGetValue(vk, out var code)) return code;
+        if (vk is >= 0x41 and <= 0x5A) return "Key" + ((char)vk).ToString();           // A-Z → KeyA-KeyZ
+        if (vk is >= 0x30 and <= 0x39) return "Digit" + (vk - 0x30);     // 0-9 → Digit0-Digit9
+        if (vk is >= 0x60 and <= 0x69) return "Numpad" + (vk - 0x60);    // numpad 0-9
+        if (vk is >= 0x70 and <= 0x7B) return "F" + (vk - 0x70 + 1);    // F1-F12
+        return null;
+    }
+
+    /// <summary>Format a PTT binding string for display, mirroring
+    /// <c>formatPttBindingDisplay</c> in static/wrapper.js ("[", "V", "Numpad 3", "F5",
+    /// "Mouse 4", "Left Shift"…). Returns "Not set" for null/empty.</summary>
+    public static string FormatBinding(string? binding)
+    {
+        if (string.IsNullOrEmpty(binding)) return "Not set";
+        var s = binding;
+        if (s.StartsWith("Mouse", StringComparison.Ordinal))
+        {
+            if (int.TryParse(s.AsSpan(5), out var n)) return "Mouse " + n;
+            return s;
+        }
+        if (s.StartsWith("Key", StringComparison.Ordinal) && s.Length == 4)
+            return s[3..]; // KeyV → V
+        var friendly = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["BracketLeft"]="[", ["BracketRight"]="]", ["Backslash"]="\\", ["Semicolon"]=";",
+            ["Quote"]="'", ["Comma"]=",", ["Period"]=".", ["Slash"]="/", ["Backquote"]="`",
+            ["Minus"]="-", ["Equal"]="=", ["Space"]="Space", ["Enter"]="Enter", ["Tab"]="Tab",
+            ["Backspace"]="Backspace", ["ShiftLeft"]="Left Shift", ["ShiftRight"]="Right Shift",
+            ["ControlLeft"]="Left Ctrl", ["ControlRight"]="Right Ctrl",
+            ["AltLeft"]="Left Alt", ["AltRight"]="Right Alt", ["CapsLock"]="Caps Lock",
+            ["ArrowLeft"]="←", ["ArrowUp"]="↑", ["ArrowRight"]="→", ["ArrowDown"]="↓",
+            ["Home"]="Home", ["End"]="End", ["PageUp"]="Page Up", ["PageDown"]="Page Down",
+            ["Insert"]="Insert", ["Delete"]="Delete", ["Escape"]="Esc"
+        };
+        if (friendly.TryGetValue(s, out var f)) return f;
+        if (s.StartsWith("Digit", StringComparison.Ordinal) && s.Length == 6) return s[5..];
+        if (s.StartsWith("Numpad", StringComparison.Ordinal)) return "Numpad " + s[6..];
+        if (s.StartsWith('F') && s.Length is >= 2 and <= 3) return s;
+        return s;
+    }
+
     /// <summary>Map a PTT binding string (e.g. "KeyP", "Mouse4", "BracketLeft") to a
     /// Windows virtual key code. Returns null if unsupported. Ports
     /// <c>pttBindingToVk</c> exactly, including the DOM-button → VK mapping for mouse.</summary>
@@ -46,44 +141,7 @@ public sealed class PttPoller : IDisposable
             };
         }
 
-        // Direct e.code → VK mapping for non-Key/non-Mouse codes
-        var codeMap = new Dictionary<string, int>(StringComparer.Ordinal)
-        {
-            { "BracketLeft",  0xdb }, // VK_OEM_4 [
-            { "BracketRight", 0xdd }, // VK_OEM_6 ]
-            { "Backslash",    0xdc }, // VK_OEM_5 \
-            { "Semicolon",    0xba }, // VK_OEM_1 ;
-            { "Quote",        0xde }, // VK_OEM_7 '
-            { "Comma",        0xbc }, // VK_OEM_COMMA ,
-            { "Period",       0xbe }, // VK_OEM_PERIOD .
-            { "Slash",        0xbf }, // VK_OEM_2 /
-            { "Backquote",    0xc0 }, // VK_OEM_3 `
-            { "Minus",        0xbd }, // VK_OEM_MINUS -
-            { "Equal",        0xbb }, // VK_OEM_PLUS =
-            { "Space",        0x20 },
-            { "Enter",        0x0d },
-            { "Tab",          0x09 },
-            { "Escape",       0x1b },
-            { "Backspace",    0x08 },
-            { "ShiftLeft",    0xa0 },
-            { "ShiftRight",   0xa1 },
-            { "ControlLeft",  0xa2 },
-            { "ControlRight", 0xa3 },
-            { "AltLeft",      0xa4 },
-            { "AltRight",     0xa5 },
-            { "CapsLock",     0x14 },
-            { "ArrowLeft",    0x25 },
-            { "ArrowUp",      0x26 },
-            { "ArrowRight",   0x27 },
-            { "ArrowDown",    0x28 },
-            { "Home",         0x24 },
-            { "End",          0x23 },
-            { "PageUp",       0x21 },
-            { "PageDown",     0x22 },
-            { "Insert",       0x2d },
-            { "Delete",       0x2e }
-        };
-        if (codeMap.TryGetValue(s, out var vk)) return vk;
+        if (CodeToVk.TryGetValue(s, out var vk)) return vk;
 
         if (s.StartsWith("Key", StringComparison.Ordinal))
         {
