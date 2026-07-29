@@ -71,29 +71,15 @@ public partial class MainWindow : Window, IMessageHandlerActions
     {
         try
         {
-            // If a Tarkov window is running at launch, auto-select it as the screen-share
-            // source so clicking share skips the picker (mirrors the Electron app's picker
-            // auto-select of EscapeFromTarkov / EscapeFromTarkovArena). We set this in-code
-            // via CoreWebView2EnvironmentOptions (NOT an env var) so a normal double-click
-            // works without the user setting anything. See TarkovDetector for the limits.
-            //
-            // The env MUST be cached and passed to EnsureCoreWebView2Async below — creating
-            // it here and then calling EnsureCoreWebView2Async() with no args builds a SECOND
-            // default env (no flags), which was why the auto-select flag never reached the
-            // WebView2 process in the first attempt.
-            var tarkov = TarkovDetector.FindTarkovWindowTitle();
-            if (!string.IsNullOrEmpty(tarkov))
-            {
-                var opts = new CoreWebView2EnvironmentOptions
-                {
-                    AdditionalBrowserArguments = $"--auto-select-desktop-capture-source={tarkov}"
-                };
-                _webview2Env = await CoreWebView2Environment.CreateAsync(options: opts);
-            }
-            else
-            {
-                _webview2Env = await CoreWebView2Environment.CreateAsync();
-            }
+            // NOTE: an earlier attempt here set --auto-select-desktop-capture-source=<Tarkov>
+            // when a Tarkov window was detected, to mirror the Electron app's picker auto-select.
+            // That Chromium flag is documented as unreliable (chromium issues 41167327, 475372)
+            // and in practice here it left a frozen, uncancellable picker when the SPA called
+            // getDisplayMedia — strictly worse than the default built-in picker. Reverted.
+            // The screen-share picker now uses WebView2's built-in Tab/Window/Screen chooser.
+            // See git history (commit 4b10f9e) for the failed approach + TarkovDetector (kept
+            // for a future native-capture approach that bypasses getDisplayMedia entirely).
+            _webview2Env = await CoreWebView2Environment.CreateAsync();
         }
         catch { /* uses the installed evergreen runtime by default */ }
     }
