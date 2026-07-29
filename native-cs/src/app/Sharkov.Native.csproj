@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <AssemblyName>Sharkov</AssemblyName>
+    <RootNamespace>Sharkov.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.23.9</Version>
+    <AssemblyVersion>0.23.9.0</AssemblyVersion>
+    <FileVersion>0.23.9.0</FileVersion>
+    <Company>Sharkov Desktop contributors</Company>
+    <Product>Sharkov</Product>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Custom entry point: VelopackApp.Build().Run() must be the first thing in Main
+         (before any UI) so it can handle first-install + apply a pending update on restart.
+         Demote App.xaml from ApplicationDefinition to Page so the WPF SDK doesn't auto-
+         generate a competing Main, and point StartupObject at our App. Pattern from
+         Velopack's own CSharpWpf sample. -->
+    <StartupObject>Sharkov.App.App</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3405.78" />
+    <!-- Auto-update + installer framework. VelopackApp.Build().Run() must be the first
+         thing in Main; UpdateManager checks GitHub releases for new versions. The vpk CLI
+         (separate dotnet tool) packs + publishes the installer to a GitHub Release in CI. -->
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="..\..\static\**\*">
+      <Link>static\%(RecursiveDir)%(FileName)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

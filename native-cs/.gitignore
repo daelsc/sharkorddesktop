@@ -1,0 +1,9 @@
+# .NET build output
+**/bin/
+**/obj/
+*.user
+*.suo
+.vs/
+
+# local publish output (dotnet publish -o)
+publish-single/

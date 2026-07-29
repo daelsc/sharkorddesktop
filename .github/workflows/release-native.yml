@@ -1,0 +1,113 @@
+name: Release native (WPF) client
+
+# Builds the non-Electron C#/WPF client under native-cs/, produces an installer + update
+# payloads with Velopack (vpk), and publishes them to a GitHub Release. Installed clients
+# check this release on startup (UpdateChecker → Velopack UpdateManager) and auto-update.
+#
+# Trigger: push of a tag "v*" (e.g. v0.23.10). The version is read from
+# native-cs/src/app/Sharkov.Native.csproj <Version>. Bump that, commit, then:
+#   git tag v0.23.10 && git push --tags
+# CI does the rest. Never re-tag a version — clients key off the version number and a
+# same-version release is a no-op for installed clients (same lesson as NSIS rule #2).
+#
+# No secrets to configure: uses the built-in GITHUB_TOKEN (contents:write).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (must match <Version> in csproj)'
+        required: true
+
+permissions:
+  contents: write   # create the GitHub Release + upload assets
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # vpk download github needs git history for deltas
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $xml = [xml](Get-Content native-cs/src/app/Sharkov.Native.csproj -Raw)
+          $v = $xml.Project.PropertyGroup.Version
+          if (-not $v) { throw "No <Version> found in native-cs/src/app/Sharkov.Native.csproj" }
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $v"
+
+      - name: Restore + test (gate)
+        run: |
+          dotnet restore native-cs/Sharkov.Native.sln
+          dotnet test native-cs/test/Sharkov.Native.Tests.csproj -c Release --no-restore
+        env:
+          # Tests don't need a display, but WebView2/WebDriver must not block on a missing runtime.
+          CI: 'true'
+
+      - name: Publish app
+        run: |
+          dotnet publish native-cs/src/app/Sharkov.Native.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained false `
+            -o publish
+        env:
+          # Make WebView2 + WPF find their runtime under the published app.
+          DOTNET_ROLL_FORWARD: LatestMinor
+
+      - name: Install vpk
+        run: dotnet tool install -g vpk
+
+      - name: Download previous release (for delta packages)
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }}
+        continue-on-error: true   # first release has nothing to delta against
+
+      - name: Pack installer + update payloads
+        run: |
+          vpk pack `
+            -u com.sharkov.desktop `
+            -v ${{ steps.version.outputs.version }} `
+            -p publish `
+            -o release `
+            --channel stable `
+            -e Sharkov.exe `
+            --packTitle "Sharkov" `
+            --packAuthors "Sharkov Desktop contributors"
+
+      - name: Upload to GitHub Release
+        run: |
+          vpk upload github `
+            --repoUrl https://github.com/${{ github.repository }} `
+            --token ${{ secrets.GITHUB_TOKEN }} `
+            --outputDir release `
+            --channel stable `
+            --publish `
+            --releaseName "Sharkov ${{ steps.version.outputs.version }}" `
+            --tag v${{ steps.version.outputs.version }}
+
+      - name: Smoke-test the installer (optional, local only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          # Install the Setup.exe silently, launch, confirm process starts, uninstall.
+          $setup = Get-ChildItem release -Filter "Setup.exe" -Recurse | Select-Object -First 1
+          if ($setup) {
+            Start-Process $setup.FullName -ArgumentList "--install","--silent" -Wait
+            Start-Sleep -Seconds 4
+            $proc = Get-Process -Name "Sharkov" -ErrorAction SilentlyContinue
+            if ($proc) { Write-Host "Smoke OK: Sharkov.exe running"; $proc | Stop-Process -Force }
+            else { Write-Host "Smoke WARN: Sharkov.exe did not start (may be expected in CI)" }
+          }
+        continue-on-error: true
