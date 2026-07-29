@@ -43,7 +43,26 @@ public partial class MainWindow : Window, IMessageHandlerActions
 
         VersionLabel.Text = "v" + GetType().Assembly.GetName().Version!.ToString(3);
         LoadBitrateCombo();
+        CenterOnPrimaryMonitor();
         _ = InitializeAsync();
+    }
+
+    /// <summary>Center the window on the primary monitor. WPF's CenterScreen centers on
+    /// whichever screen the mouse is on, which on multi-mon setups with a left-arranged
+    /// secondary (e.g. DISPLAY1 at negative X) can strand the window off-screen. We place
+    /// the window at the primary monitor's origin offset by half the screen-size
+    /// difference, using WPF SystemParameters (no WinForms dependency to avoid namespace
+    /// collisions with System.Windows.*).</summary>
+    private void CenterOnPrimaryMonitor()
+    {
+        try
+        {
+            var sw = System.Windows.SystemParameters.PrimaryScreenWidth;
+            var sh = System.Windows.SystemParameters.PrimaryScreenHeight;
+            Left = Math.Max(0, (sw - Width) / 2);
+            Top = Math.Max(0, (sh - Height) / 2);
+        }
+        catch { /* fall back to default placement */ }
     }
 
     // Writes one JSON line per report to %APPDATA%\Sharkov\rtc-stats.log (ported from the
