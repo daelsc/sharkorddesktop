@@ -68,7 +68,27 @@ public partial class MainWindow : Window, IMessageHandlerActions
 
     private static async Task EnsureWebView2EnvironmentAsync()
     {
-        try { await CoreWebView2Environment.CreateAsync(); }
+        try
+        {
+            // If a Tarkov window is running at launch, auto-select it as the screen-share
+            // source so clicking share skips the picker (mirrors the Electron app's picker
+            // auto-select of EscapeFromTarkov / EscapeFromTarkovArena). We set this in-code
+            // via CoreWebView2EnvironmentOptions (NOT an env var) so a normal double-click
+            // works without the user setting anything. See TarkovDetector for the limits.
+            var tarkov = TarkovDetector.FindTarkovWindowTitle();
+            if (!string.IsNullOrEmpty(tarkov))
+            {
+                var opts = new CoreWebView2EnvironmentOptions
+                {
+                    AdditionalBrowserArguments = $"--auto-select-desktop-capture-source={tarkov}"
+                };
+                await CoreWebView2Environment.CreateAsync(options: opts);
+            }
+            else
+            {
+                await CoreWebView2Environment.CreateAsync();
+            }
+        }
         catch { /* uses the installed evergreen runtime by default */ }
     }
 

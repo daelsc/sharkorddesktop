@@ -22,7 +22,7 @@ internal static class Win32
     public static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern bool GetWindowTextLengthW(IntPtr hWnd);
+    public static extern int GetWindowTextLengthW(IntPtr hWnd);
 
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 }
